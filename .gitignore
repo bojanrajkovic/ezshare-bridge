@@ -1,3 +1,4 @@
 .pio/
 include/secrets.h
 mise.local.toml
+case/out/
