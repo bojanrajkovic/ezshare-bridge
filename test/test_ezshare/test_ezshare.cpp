@@ -138,6 +138,14 @@ static void test_safe_names() {
     TEST_ASSERT_FALSE(isSafeName(std::string("a\nb")));
 }
 
+static void test_json_escape() {
+    TEST_ASSERT_EQUAL_STRING("plain", jsonEscape("plain").c_str());
+    TEST_ASSERT_EQUAL_STRING("a\\\"b\\\\c", jsonEscape("a\"b\\c").c_str());
+    TEST_ASSERT_EQUAL_STRING("x\\ny\\rz\\t", jsonEscape("x\ny\rz\t").c_str());
+    TEST_ASSERT_EQUAL_STRING("\\u0001", jsonEscape(std::string(1, '\x01')).c_str());
+    TEST_ASSERT_EQUAL_STRING("<a href=\\\"x\\\">", jsonEscape("<a href=\"x\">").c_str());
+}
+
 static void test_window() {
     TEST_ASSERT_TRUE(inWindow(9, 9, 18));
     TEST_ASSERT_TRUE(inWindow(17, 9, 18));
@@ -168,6 +176,7 @@ int main() {
     RUN_TEST(test_downloads_missing_or_changed_files);
     RUN_TEST(test_tolerates_fat_two_second_times);
     RUN_TEST(test_safe_names);
+    RUN_TEST(test_json_escape);
     RUN_TEST(test_window);
     return UNITY_END();
 }

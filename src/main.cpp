@@ -9,6 +9,7 @@
 
 #include "config.h"
 #include "ezshare.h"
+#include "log.h"
 #include "state.h"
 #include "sync.h"
 #include "web.h"
@@ -55,9 +56,12 @@ void setup() {
     while (!connectWifi(HOME_WIFI_SSID, HOME_WIFI_PASSWORD, JOIN_TIMEOUT_SECONDS * 1000UL)) {
         Serial.println("home network: retrying");
     }
-    Serial.printf("home network: %s\n", WiFi.localIP().toString().c_str());
-
     configTime(TZ_STRING, NTP_SERVER);
+    // Give NTP a moment so the boot line carries a real timestamp; "up" orders it regardless.
+    for (int i = 0; i < 50 && time(nullptr) < 1700000000; ++i) delay(100);
+    logEvent("info", "boot",
+             {text("version", BRIDGE_VERSION), text("reset_reason", ESP.getResetReason()),
+              text("ip", WiFi.localIP().toString()), num("sd_ok", metrics.sdOk ? 1 : 0)});
 
     ArduinoOTA.setHostname(BRIDGE_HOSTNAME);
     ArduinoOTA.setPassword(OTA_PASSWORD);

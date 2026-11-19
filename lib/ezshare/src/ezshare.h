@@ -78,6 +78,9 @@ bool isSafeName(std::string_view name);
 // Whether a byte count matches a size the card listed in KB.
 bool sizeMatchesKb(uint64_t sizeBytes, uint32_t sizeKb);
 
+// Escapes `s` for use inside a JSON string literal (without the surrounding quotes).
+std::string jsonEscape(std::string_view s);
+
 // Whether `hour` falls in [startHour, endHour). A window with startHour > endHour wraps
 // past midnight. startHour == endHour means the window is always open.
 bool inWindow(int hour, int startHour, int endHour);

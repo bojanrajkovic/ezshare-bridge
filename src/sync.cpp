@@ -9,6 +9,7 @@
 
 #include "config.h"
 #include "ezshare.h"
+#include "log.h"
 
 namespace {
 
@@ -53,19 +54,17 @@ bool listDir(const std::string& query, Run& run, OnEntry onEntry) {
     HTTPClient http;
     http.setTimeout(15000);
     const String url = String("http://" EZSHARE_HOST "/dir?") + query.c_str();
-    if (!http.begin(client, url)) {
-        run.fail(SyncResult::ListingFailed);
-        return false;
-    }
-    const int code = http.GET();
+    const int code = http.begin(client, url) ? http.GET() : -1;
     if (code != HTTP_CODE_OK) {
         http.end();
+        logEvent("error", "listing_failed", {text("query", query.c_str()), num("status", code)});
         run.fail(SyncResult::ListingFailed);
         return false;
     }
     fs::File out = SDFS.open(kListingPath, "w");
     if (!out) {
         http.end();
+        logEvent("error", "sd_error", {text("op", "write"), text("path", kListingPath)});
         run.fail(SyncResult::SdError);
         return false;
     }
@@ -73,6 +72,7 @@ bool listDir(const std::string& query, Run& run, OnEntry onEntry) {
     out.close();
     http.end();
     if (written < 0) {
+        logEvent("error", "listing_failed", {text("query", query.c_str()), num("status", written)});
         run.fail(SyncResult::ListingFailed);
         return false;
     }
@@ -87,7 +87,7 @@ bool listDir(const std::string& query, Run& run, OnEntry onEntry) {
         const String line = in.readStringUntil('\n');
         const ezshare::ParsedLine parsed = ezshare::parseLine(std::string_view(line.c_str(), line.length()));
         if (std::holds_alternative<ezshare::Malformed>(parsed)) {
-            Serial.printf("listing %s: unrecognized line: %s\n", query.c_str(), line.c_str());
+            logEvent("error", "listing_line_rejected", {text("query", query.c_str()), text("line", line)});
             ok = false;
             continue;
         }
@@ -102,7 +102,7 @@ bool listDir(const std::string& query, Run& run, OnEntry onEntry) {
 void syncFile(const ezshare::File& file, const String& dir, Run& run) {
     if (file.name[0] == '.') return;
     if (!ezshare::isSafeName(file.name)) {
-        Serial.printf("skipping unsafe name: %s\n", file.name.c_str());
+        logEvent("error", "unsafe_name", {text("name", file.name.c_str())});
         run.fail(SyncResult::ListingFailed);
         return;
     }
@@ -126,8 +126,10 @@ void syncFile(const ezshare::File& file, const String& dir, Run& run) {
     HTTPClient http;
     http.setTimeout(30000);
     const String url = String("http://" EZSHARE_HOST "/download?") + file.query.c_str();
-    if (!http.begin(client, url) || http.GET() != HTTP_CODE_OK) {
+    const int code = http.begin(client, url) ? http.GET() : -1;
+    if (code != HTTP_CODE_OK) {
         http.end();
+        logEvent("error", "download_failed", {text("path", path), num("status", code)});
         run.pending++;
         run.fail(SyncResult::DownloadFailed);
         return;
@@ -137,6 +139,7 @@ void syncFile(const ezshare::File& file, const String& dir, Run& run) {
     fs::File part = SDFS.open(partPath, "w");
     if (!part) {
         http.end();
+        logEvent("error", "sd_error", {text("op", "write"), text("path", partPath)});
         run.pending++;
         run.fail(SyncResult::SdError);
         return;
@@ -151,8 +154,9 @@ void syncFile(const ezshare::File& file, const String& dir, Run& run) {
     const bool complete = written >= 0 && (expected < 0 || written == expected) &&
                           ezshare::sizeMatchesKb(static_cast<uint64_t>(written), file.sizeKb);
     if (!complete) {
-        Serial.printf("download %s: got %d of %d bytes, listed %u KB\n", path.c_str(), written, expected,
-                      static_cast<unsigned>(file.sizeKb));
+        logEvent("error", "download_incomplete",
+                 {text("path", path), num("bytes", written), num("content_length", expected),
+                  num("listed_kb", file.sizeKb)});
         SDFS.remove(partPath);
         run.pending++;
         run.fail(SyncResult::DownloadFailed);
@@ -162,6 +166,7 @@ void syncFile(const ezshare::File& file, const String& dir, Run& run) {
     // FAT can't rename over an existing file. The NAS keeps the previous copy meanwhile.
     SDFS.remove(path);
     if (!SDFS.rename(partPath, path)) {
+        logEvent("error", "sd_error", {text("op", "rename"), text("path", path)});
         run.pending++;
         run.fail(SyncResult::SdError);
         return;
@@ -245,12 +250,16 @@ bool connectWifi(const char* ssid, const char* password, uint32_t timeoutMs) {
 }
 
 SyncResult runSync() {
-    Run run{millis() + SYNC_TIME_BUDGET_SECONDS * 1000UL};
+    const uint32_t startMs = millis();
+    const uint32_t filesBefore = metrics.filesDownloaded;
+    const uint64_t bytesBefore = metrics.bytesDownloaded;
+    Run run{startMs + SYNC_TIME_BUDGET_SECONDS * 1000UL};
     SDFS.setTimeCallback(fileTimeCallback);
 
     if (!metrics.sdOk) {
         run.fail(SyncResult::SdError);
     } else if (!connectWifi(EZSHARE_SSID, EZSHARE_PASSWORD, JOIN_TIMEOUT_SECONDS * 1000UL)) {
+        logEvent("error", "join_failed", {text("ssid", EZSHARE_SSID), num("wifi_status", WiFi.status())});
         run.fail(SyncResult::JoinFailed);
     } else {
         metrics.ezshareRssi = WiFi.RSSI();
@@ -266,6 +275,12 @@ SyncResult runSync() {
     metrics.pendingFiles = run.pending;
     if (run.result == SyncResult::Ok) metrics.lastSuccessEpoch = static_cast<uint32_t>(time(nullptr));
     if (metrics.sdOk) updateSdFree();
-    Serial.printf("sync: %s, %u pending\n", resultLabel(run.result), static_cast<unsigned>(run.pending));
+    const char* level = run.result == SyncResult::Ok           ? "info"
+                        : run.result == SyncResult::TimeBudget ? "warn"
+                                                               : "error";
+    logEvent(level, "sync",
+             {text("result", resultLabel(run.result)), num("files", metrics.filesDownloaded - filesBefore),
+              num("bytes", static_cast<int64_t>(metrics.bytesDownloaded - bytesBefore)), num("pending", run.pending),
+              num("seconds", (millis() - startMs) / 1000), num("ezshare_rssi", metrics.ezshareRssi)});
     return run.result;
 }

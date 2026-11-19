@@ -119,6 +119,37 @@ The layout matches the SD card's: `STR.edf`, `Identification.*`, `SETTINGS/`, `D
 Counters reset when the bridge reboots. A useful alert: the last success is more than a day
 old. That covers a bridge that's down, a card it can't reach, and a backlog that never clears.
 
+## Logs
+
+The bridge writes one JSON line per event to the serial console and to `/.bridge/log.txt` on
+its microSD: boot, each sync run's outcome, and every failure with its details (the listing
+line it rejected, the download that came up short, the network it couldn't join).
+
+```json
+{"ts":"2026-11-20T14:00:41Z","up":3612,"level":"error","logger":"ezshare-bridge","event":"download_incomplete","path":"/DATALOG/20261119/20261119_221502_BRP.edf","bytes":512000,"content_length":4190420,"listed_kb":4093}
+```
+
+`ts` is empty until NTP answers; `up` (seconds since boot) orders lines regardless. `level` is
+one of `debug`, `info`, `warn`, `error`, `fatal`.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /log` | The current log file |
+| `GET /log/unshipped` | Lines not yet acknowledged, with an `X-Log-End` header |
+| `POST /log/ack?offset=<X-Log-End>` | Marks those lines shipped |
+
+To forward the log somewhere, fetch `/log/unshipped`, store or print the lines, then
+acknowledge `X-Log-End`. A shipper that dies before acknowledging gets the same lines again,
+so nothing is lost and the worst case is a duplicate:
+
+```bash
+end=$(curl -fsS -D - -o >(cat) http://<bridge>/log/unshipped | tr -d '\r' | awk 'tolower($1)=="x-log-end:" {print $2}')
+curl -fsS -X POST "http://<bridge>/log/ack?offset=${end}"
+```
+
+The file rotates to `log.1.txt` at 256 KB once every line has been shipped, or at 1 MB
+regardless if nothing is acknowledging it.
+
 ## Configuration
 
 Everything besides credentials has a default in `include/config.h`. Override any of them in

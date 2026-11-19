@@ -148,6 +148,30 @@ bool isSafeName(std::string_view name) {
     return true;
 }
 
+std::string jsonEscape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    static const char* hex = "0123456789abcdef";
+                    out += "\\u00";
+                    out += hex[(c >> 4) & 0xf];
+                    out += hex[c & 0xf];
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
+
 bool inWindow(int hour, int startHour, int endHour) {
     if (startHour == endHour) return true;
     if (startHour < endHour) return hour >= startHour && hour < endHour;
