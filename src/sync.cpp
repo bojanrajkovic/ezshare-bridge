@@ -87,7 +87,9 @@ bool listDir(const std::string& query, Run& run, OnEntry onEntry) {
         const String line = in.readStringUntil('\n');
         const ezshare::ParsedLine parsed = ezshare::parseLine(std::string_view(line.c_str(), line.length()));
         if (std::holds_alternative<ezshare::Malformed>(parsed)) {
-            logEvent("error", "listing_line_rejected", {text("query", query.c_str()), text("line", line)});
+            // Cut to 200 characters: escaping copies the line again, and the heap is small.
+            logEvent("error", "listing_line_rejected",
+                     {text("query", query.c_str()), text("line", line.substring(0, 200))});
             ok = false;
             continue;
         }
