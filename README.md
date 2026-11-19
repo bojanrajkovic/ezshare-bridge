@@ -143,7 +143,8 @@ acknowledge `X-Log-End`. A shipper that dies before acknowledging gets the same 
 so nothing is lost and the worst case is a duplicate:
 
 ```bash
-end=$(curl -fsS -D - -o >(cat) http://<bridge>/log/unshipped | tr -d '\r' | awk 'tolower($1)=="x-log-end:" {print $2}')
+curl -fsS -D headers.txt http://<bridge>/log/unshipped   # the lines, on stdout
+end=$(tr -d '\r' < headers.txt | awk 'tolower($1) == "x-log-end:" {print $2}')
 curl -fsS -X POST "http://<bridge>/log/ack?offset=${end}"
 ```
 
