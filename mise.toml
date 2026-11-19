@@ -2,6 +2,8 @@
 
 [tools]
 "aqua:1password/cli" = "v2.42.0"  # the real op: `mise run secrets` signs in with your password
+# Linux only: the release's macOS build is a .dmg. On a Mac, install OpenSCAD.app or `brew install openscad`.
+"github:openscad/openscad" = { version = "2021.01", version_prefix = "openscad-", asset_pattern = "OpenSCAD-*-x86_64.AppImage", bin = "openscad", os = ["linux"] }
 uv = "0.11.7"
 
 [env]
@@ -32,6 +34,19 @@ EZB_OTA_PASSWORD="$(sed -n 's/^#define OTA_PASSWORD "\(.*\)"$/\1/p' include/secr
 [tasks.monitor]
 description = "Serial console over USB"
 run = "uvx --from platformio==6.2.0 pio device monitor -e nonpro"
+
+[tasks.case]
+description = "Render the case to case/out/base.stl and lid.stl"
+# Runs the AppImage without FUSE, which containers and some distros lack.
+env = { APPIMAGE_EXTRACT_AND_RUN = "1" }
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p case/out
+for part in base lid; do
+  openscad -D "part=\"$part\"" -o "case/out/$part.stl" case/case.scad
+done
+'''
 
 [tasks.secrets]
 description = "Write include/secrets.h from 1Password"
