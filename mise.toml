@@ -4,7 +4,7 @@
 "aqua:1password/cli" = "v2.42.0"  # the real op: `mise run secrets` signs in with your password
 # Linux only: the release's macOS build is a .dmg. On a Mac, install OpenSCAD.app or `brew install openscad`.
 "github:openscad/openscad" = { version = "2021.01", version_prefix = "openscad-", asset_pattern = "OpenSCAD-*-x86_64.AppImage", bin = "openscad", os = ["linux"] }
-uv = "0.11.7"
+uv = "0.13.8"
 
 [env]
 _.file = { path = "mise.local.toml", redact = true, tools = false }
