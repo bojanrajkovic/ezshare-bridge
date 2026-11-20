@@ -68,7 +68,8 @@ void setup() {
     for (int i = 0; i < 50 && time(nullptr) < 1700000000; ++i) delay(100);
     logEvent("info", "boot",
              {text("version", BRIDGE_VERSION), text("reset_reason", ESP.getResetReason()),
-              text("ip", WiFi.localIP().toString()), num("sd_ok", metrics.sdOk ? 1 : 0)});
+              text("ip", WiFi.localIP().toString()), num("sd_ok", metrics.sdOk ? 1 : 0),
+              num("lookback_days", LOOKBACK_DAYS)});
 
     ArduinoOTA.setHostname(BRIDGE_HOSTNAME);
     ArduinoOTA.setPassword(OTA_PASSWORD);

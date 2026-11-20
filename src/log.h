@@ -19,6 +19,10 @@ inline LogField num(const char* key, int64_t value) { return {key, String(static
 // microSD. `level` is one of debug, info, warn, error, fatal.
 void logEvent(const char* level, const char* event, std::initializer_list<LogField> fields = {});
 
+// Tags every line logged from now on with "run": n, so a run's lines can be pulled out
+// together. 0 stops tagging.
+void setLogRun(uint32_t run);
+
 // Sends log lines written since the last call to SYSLOG_HOST as RFC 5424 syslog over UDP,
 // up to 50 per call, and records how far it got. Does nothing when SYSLOG_HOST is empty or
 // the bridge is off the home network; the lines wait in the file until the next call.

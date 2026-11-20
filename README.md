@@ -156,17 +156,19 @@ old. That covers a bridge that's down, a card it can't reach, and a backlog that
 ## Logs
 
 The bridge writes one JSON line per event to the serial console and to `/.bridge/log.txt` on
-its microSD: boot, each sync run's outcome, and every failure with its details.
+its microSD: boot, each sync run's outcome, each copied file, and every failure with its
+details. Lines logged during a run carry `run`, a number that goes up by one each run and
+survives restarts (`/.bridge/runs`), so one run's lines can be read together.
 
 ```json
-{"ts":"2026-11-20T14:00:41Z","up":3612,"level":"warn","logger":"ezshare-bridge","event":"download_stalled","path":"/DATALOG/20261119/20261119_221502_BRP.edf","bytes":512000,"total":4190420}
+{"ts":"2026-11-20T14:00:41Z","up":3612,"level":"warn","logger":"ezshare-bridge","event":"download_stalled","run":12,"path":"/DATALOG/20261119/20261119_221502_BRP.edf","bytes":512000,"total":4190420}
 ```
 
 | Event | Fields |
 |---|---|
-| `boot` | `version`, `reset_reason`, `ip`, `sd_ok` |
+| `boot` | `version`, `reset_reason`, `ip`, `sd_ok`, `lookback_days` |
 | `copied` | `path`, `bytes`, `ms` (from the first request to the rename) |
-| `sync` | `result`, `files`, `bytes`, `pending`, `probes`, `folders` (night folders found on the card), `seconds`, `ezshare_rssi` |
+| `sync` | `result`, `files`, `bytes`, `pending`, `probes`, `folders` (night folders found on the card), `seconds`, `ezshare_rssi`, `lookback_days` |
 | `join_failed` | `ssid`, `wifi_status` |
 | `probe_failed` | `pattern`, `folder`, `status` (the HTTP status, or a negative client error) |
 | `download_stalled` | `path`, `bytes` (in `<name>.part` so far), `total`, `cause` (`sd_short_write`, `timeout` or `closed`), and on a short write `chunk` and `written`; the bridge resumes from there |

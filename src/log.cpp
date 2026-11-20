@@ -58,6 +58,10 @@ String escape(const String& s) { return String(ezshare::jsonEscape(std::string_v
 
 }  // namespace
 
+uint32_t logRun = 0;
+
+void setLogRun(uint32_t run) { logRun = run; }
+
 void logEvent(const char* level, const char* event, std::initializer_list<LogField> fields) {
     String line;
     line.reserve(160);
@@ -70,6 +74,10 @@ void logEvent(const char* level, const char* event, std::initializer_list<LogFie
     line += "\",\"logger\":\"ezshare-bridge\",\"event\":\"";
     line += event;
     line += '"';
+    if (logRun != 0) {
+        line += ",\"run\":";
+        line += logRun;
+    }
     for (const auto& f : fields) {
         line += ",\"";
         line += f.key;

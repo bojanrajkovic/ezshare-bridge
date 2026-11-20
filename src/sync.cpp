@@ -372,6 +372,22 @@ std::optional<ezshare::Date> cardStartDate() {
 }
 
 constexpr const char* kBackfillPath = "/.bridge/backfilled";
+constexpr const char* kRunCountPath = "/.bridge/runs";
+
+// Counts runs across restarts, so each run's log lines share a number no other run uses.
+uint32_t nextRunNumber() {
+    uint32_t n = 0;
+    if (fs::File f = SDFS.open(kRunCountPath, "r")) {
+        n = f.readStringUntil('\n').toInt();
+        f.close();
+    }
+    ++n;
+    if (fs::File f = SDFS.open(kRunCountPath, "w")) {
+        f.print(n);
+        f.close();
+    }
+    return n;
+}
 
 // The newest night older than the lookback window that a run has already checked, along with
 // every night before it.
@@ -439,6 +455,7 @@ SyncResult runSync() {
     const uint32_t filesBefore = metrics.filesDownloaded;
     const uint64_t bytesBefore = metrics.bytesDownloaded;
     Run run{startMs + SYNC_TIME_BUDGET_SECONDS * 1000UL};
+    if (metrics.sdOk) setLogRun(nextRunNumber());
 
     if (!metrics.sdOk) {
         run.fail(SyncResult::SdError);
@@ -469,6 +486,7 @@ SyncResult runSync() {
              {text("result", resultLabel(run.result)), num("files", metrics.filesDownloaded - filesBefore),
               num("bytes", static_cast<int64_t>(metrics.bytesDownloaded - bytesBefore)), num("pending", run.pending),
               num("probes", run.probes), num("folders", run.folders), num("seconds", metrics.lastSyncSeconds),
-              num("ezshare_rssi", metrics.ezshareRssi)});
+              num("ezshare_rssi", metrics.ezshareRssi), num("lookback_days", LOOKBACK_DAYS)});
+    setLogRun(0);
     return run.result;
 }
