@@ -173,9 +173,10 @@ void handleLog() {
 bool restartRequested = false;
 
 // Restarting starts a sync right away. The OTA password guards it, so another device on the
-// network can't keep the bridge restarting and syncing.
+// network can't keep the bridge restarting and syncing. Digest auth keeps the password off the
+// wire.
 void handleRestart() {
-    if (!server.authenticate("bridge", OTA_PASSWORD)) return server.requestAuthentication();
+    if (!server.authenticate("bridge", OTA_PASSWORD)) return server.requestAuthentication(DIGEST_AUTH);
     logEvent("info", "restart_requested", {});
     server.send(202, "text/plain", "restarting\n");
     restartRequested = true;

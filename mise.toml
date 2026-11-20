@@ -35,7 +35,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 password="$(sed -n 's/^#define OTA_PASSWORD "\(.*\)"$/\1/p' include/secrets.h)"
-curl -fsS -m 10 -X POST -u "bridge:${password}" "http://${usage_host}/restart"
+curl -fsS -m 10 --digest -X POST -u "bridge:${password}" "http://${usage_host}/restart"
 '''
 
 [tasks.monitor]
