@@ -5,6 +5,7 @@
 #include <SDFS.h>
 #include <time.h>
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
@@ -56,6 +57,17 @@ struct ProbeReply {
     Signature signature;  // set on a hit
 };
 
+// The card runs out of connections after about a thousand requests in a few minutes and then
+// answers 503 until it's power-cycled, so requests are spaced at least this far apart.
+constexpr uint32_t kRequestSpacingMs = 100;
+
+void paceRequests() {
+    static uint32_t lastMs = 0;
+    const uint32_t since = millis() - lastMs;
+    if (lastMs != 0 && since < kRequestSpacingMs) delay(kRequestSpacingMs - since);
+    lastMs = millis();
+}
+
 String downloadUrl(const Folder& folder, const std::string& fname) {
     // fname goes in unencoded: the card hangs on %3F, and names and patterns hold no other
     // characters that need encoding.
@@ -65,20 +77,28 @@ String downloadUrl(const Folder& folder, const std::string& fname) {
 // Asks the card for the bytes at signatureRange(pattern) of the first file matching
 // `pattern`. 206 is a hit, 404 a miss, anything else a failure.
 ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
-    run.probes++;
-    metrics.probes++;
     const ezshare::ByteRange range = ezshare::signatureRange(pattern);
     static const char* kHeaders[] = {"Content-Range"};
 
     WiFiClient client;
     HTTPClient http;
-    http.setReuse(false);
-    http.setTimeout(kProbeTimeoutMs);
     int code = -1;
-    if (http.begin(client, downloadUrl(folder, pattern))) {
-        http.addHeader("Range", "bytes=" + String(range.first) + "-" + String(range.last));
-        http.collectHeaders(kHeaders, 1);
-        code = http.GET();
+    // The card answers 503 once it has had too many connections in a short time; back off.
+    for (uint32_t backoffMs = 500; backoffMs <= 8000; backoffMs *= 2) {
+        run.probes++;
+        metrics.probes++;
+        paceRequests();
+        http.setReuse(false);
+        http.setTimeout(kProbeTimeoutMs);
+        code = -1;
+        if (http.begin(client, downloadUrl(folder, pattern))) {
+            http.addHeader("Range", "bytes=" + String(range.first) + "-" + String(range.last));
+            http.collectHeaders(kHeaders, 1);
+            code = http.GET();
+        }
+        if (code != HTTP_CODE_SERVICE_UNAVAILABLE) break;
+        http.end();
+        delay(backoffMs);
     }
     ProbeReply reply{ProbeStatus::Failed, {}};
     if (code == HTTP_CODE_NOT_FOUND) {
@@ -90,6 +110,16 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
             reply.status = ProbeStatus::Hit;
             reply.signature.size = *total;
             if (ezshare::keepsSignatureBytes(pattern)) reply.signature.bytes.assign(body.c_str(), body.length());
+        }
+    } else if (code == HTTP_CODE_OK && http.getSize() >= 0 &&
+               static_cast<uint32_t>(http.getSize()) <= range.last + 1) {
+        // The card answers a range that covers the whole file (a .crc is 4-8 bytes) with a plain
+        // 200 and the file itself. A 200 for a bigger file means it ignored the range: a failure.
+        const String body = http.getString();
+        reply.status = ProbeStatus::Hit;
+        reply.signature.size = static_cast<uint64_t>(http.getSize());
+        if (ezshare::keepsSignatureBytes(pattern) && body.length() > range.first) {
+            reply.signature.bytes.assign(body.c_str() + range.first, body.length() - range.first);
         }
     }
     http.end();
@@ -119,6 +149,44 @@ std::optional<Signature> localSignature(const Folder& folder, const std::string&
     return s;
 }
 
+struct CopyResult {
+    const char* cause = "none";  // "done", "sd_short_write", "timeout" or "closed"
+    int chunk = 0;               // on a short write: bytes handed to the SD file
+    int written = 0;             // ...and bytes it accepted
+};
+
+// Copies the response body into `out` a sector at a time. HTTPClient::writeToStream gave up
+// after the first sector on every large file, so this checks each write itself.
+CopyResult copyBody(HTTPClient& http, fs::File& out) {
+    WiFiClient* stream = http.getStreamPtr();
+    int remaining = http.getSize();  // -1 when the card sends no Content-Length
+    uint8_t buf[512];
+    uint32_t lastData = millis();
+    CopyResult r;
+    while (remaining != 0) {
+        const size_t avail = stream->available();
+        if (avail == 0) {
+            if (!stream->connected()) return r.cause = remaining < 0 ? "done" : "closed", r;
+            if (millis() - lastData > kDownloadTimeoutMs) return r.cause = "timeout", r;
+            delay(1);
+            continue;
+        }
+        const size_t want = std::min(avail, remaining > 0 ? std::min(sizeof(buf), static_cast<size_t>(remaining)) : sizeof(buf));
+        const size_t n = stream->readBytes(buf, want);
+        const size_t w = out.write(buf, n);
+        if (w != n) {
+            r.cause = "sd_short_write";
+            r.chunk = static_cast<int>(n);
+            r.written = static_cast<int>(w);
+            return r;
+        }
+        if (remaining > 0) remaining -= static_cast<int>(n);
+        lastData = millis();
+    }
+    r.cause = "done";
+    return r;
+}
+
 // Streams `name` into <name>.part, resuming with a Range request when a transfer stalls or
 // comes up short, and renames it over the copy once it has all `total` bytes.
 bool download(const Folder& folder, const std::string& name, uint64_t total, Run& run) {
@@ -142,12 +210,13 @@ bool download(const Folder& folder, const std::string& name, uint64_t total, Run
         HTTPClient http;
         http.setReuse(false);
         http.setTimeout(kDownloadTimeoutMs);
+        paceRequests();
         code = -1;
         if (http.begin(client, downloadUrl(folder, name))) {
             if (have > 0) http.addHeader("Range", "bytes=" + String(have) + "-");
             code = http.GET();
         }
-        if (code == expected) http.writeToStream(&part);
+        const CopyResult copied = code == expected ? copyBody(http, part) : CopyResult{};
         const size_t got = part.size();
         part.close();
         http.end();
@@ -167,7 +236,9 @@ bool download(const Folder& folder, const std::string& name, uint64_t total, Run
             return true;
         }
         logEvent("warn", "download_stalled",
-                 {text("path", path), num("bytes", got), num("total", static_cast<int64_t>(total))});
+                 {text("path", path), num("bytes", got), num("total", static_cast<int64_t>(total)),
+                  text("cause", copied.cause), num("chunk", copied.chunk), num("written", copied.written),
+                  num("heap", ESP.getFreeHeap())});
         if (got > total) break;
     }
     logEvent("error", "download_failed", {text("path", path), num("status", code)});

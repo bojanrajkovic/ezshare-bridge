@@ -129,7 +129,7 @@ A run reports the first failure it hit:
 |---|---|
 | `ok` | Everything on the card is copied |
 | `join_failed` | The bridge couldn't join the card's network |
-| `probe_failed` | A probe got neither 206 nor 404, or timed out |
+| `probe_failed` | A probe got neither a match (206, or 200 for a whole small file) nor 404, or timed out |
 | `download_failed` | A download failed, or came up short after three resumes |
 | `sd_error` | The bridge's own microSD failed |
 | `time_budget` | The run hit `SYNC_TIME_BUDGET_SECONDS` with work left |
@@ -152,7 +152,7 @@ its microSD: boot, each sync run's outcome, and every failure with its details.
 | `sync` | `result`, `files`, `bytes`, `pending`, `probes`, `folders` (night folders found on the card), `seconds`, `ezshare_rssi` |
 | `join_failed` | `ssid`, `wifi_status` |
 | `probe_failed` | `pattern`, `folder`, `status` (the HTTP status, or a negative client error) |
-| `download_stalled` | `path`, `bytes` (in `<name>.part` so far), `total`; the bridge resumes from there |
+| `download_stalled` | `path`, `bytes` (in `<name>.part` so far), `total`, `cause` (`sd_short_write`, `timeout` or `closed`), and on a short write `chunk` and `written`; the bridge resumes from there |
 | `download_failed` | `path`, `status` |
 | `sd_error` | `op`, `path` |
 
@@ -214,13 +214,19 @@ Range: bytes=<first>-<last>
   names don't work. Matching ignores case.
 - `fname` accepts `*` and `?` wildcards, and the card answers with the first matching file. Send
   `?` as is: the card hangs on `%3F` until the request times out.
-- A match answers `206` with `Content-Range: bytes <first>-<last>/<size>`. No match answers
-  `404` within a few milliseconds. Neither names the file that matched.
+- A match answers `206` with `Content-Range: bytes <first>-<last>/<size>`, or a plain `200` with
+  the whole file when the range covers all of it (a 4–8 byte `.crc`). No match answers `404`
+  within a few milliseconds. Neither names the file that matched.
 - `Last-Modified` is always in 1990, so the bridge ignores it.
+- After about a thousand requests in a few minutes, the card answers `503` to everyone until
+  it's power-cycled. The bridge spaces requests at least 100 ms apart, and backs off on a `503`.
+- `HTTPClient::writeToStream` stops after the first 512 bytes of every larger file when writing
+  to the microSD, so the bridge copies response bodies a sector at a time itself.
 
 ## How it finds and copies files
 
-A **probe** is one ranged request. `206` means a file matches, `404` means none does, and
+A **probe** is one ranged request. `206` (or `200` for a file the range covers whole) means a
+file matches, `404` means none does, and
 anything else (or a timeout) fails the run with `probe_failed`, so a card that misbehaves
 can't make files look absent.
 
