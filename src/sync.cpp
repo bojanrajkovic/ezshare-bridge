@@ -9,6 +9,7 @@
 
 #include "config.h"
 #include "ezshare.h"
+#include "listing.h"
 #include "log.h"
 
 namespace {

@@ -1,5 +1,9 @@
 #include <unity.h>
 
+#include <cctype>
+#include <functional>
+#include <set>
+
 #include "ezshare.h"
 
 using namespace ezshare;
@@ -7,77 +11,159 @@ using namespace ezshare;
 void setUp() {}
 void tearDown() {}
 
-// Lines in the format community clients document for the card's /dir listing.
-static const char* kFileLine =
-    "2024- 6- 7   20:50:24          64KB  <a href=\"http://192.168.4.1/download?file=JOURNAL.DAT\"> Journal.dat</a>";
-static const char* kDatalogFileLine =
-    "2026-11-18   12:00:04         808KB  <a href=\"http://192.168.4.1/download?file=DATALOG%5C20261118%5C20261~1.EDF\"> "
-    "20261118_120004_EVE.edf</a>";
-static const char* kDirLine =
-    "2026-11-18   12:00:04   &lt;DIR&gt;   <a href=\"dir?dir=A:%5CDATALOG%5C20261118\"> 20261118</a>";
+// A fake card folder: answers a probe the way /download?fname=<pattern> does, matching
+// `*` and `?` case-insensitively against the folder's names.
+struct FakeFolder {
+    std::set<std::string> names;
+    int probes = 0;
+    std::string failOn;  // a pattern that gets neither 206 nor 404
 
-static void test_parses_file_line() {
-    auto parsed = parseLine(kFileLine);
-    auto* file = std::get_if<File>(&parsed);
-    TEST_ASSERT_NOT_NULL(file);
-    TEST_ASSERT_EQUAL_STRING("Journal.dat", file->name.c_str());
-    TEST_ASSERT_EQUAL_STRING("file=JOURNAL.DAT", file->query.c_str());
-    TEST_ASSERT_EQUAL_UINT32(64, file->sizeKb);
-    TEST_ASSERT_EQUAL_INT(2024, file->modified.year);
-    TEST_ASSERT_EQUAL_INT(6, file->modified.month);
-    TEST_ASSERT_EQUAL_INT(7, file->modified.day);
-    TEST_ASSERT_EQUAL_INT(20, file->modified.hour);
-    TEST_ASSERT_EQUAL_INT(50, file->modified.minute);
-    TEST_ASSERT_EQUAL_INT(24, file->modified.second);
+    FakeFolder(std::set<std::string> n = {}) : names(std::move(n)) {}
+
+    static bool match(const char* p, const char* s) {
+        if (*p == '\0') return *s == '\0';
+        if (*p == '*') return match(p + 1, s) || (*s != '\0' && match(p, s + 1));
+        if (*s == '\0') return false;
+        if (*p != '?' && std::tolower(static_cast<unsigned char>(*p)) != std::tolower(static_cast<unsigned char>(*s)))
+            return false;
+        return match(p + 1, s + 1);
+    }
+
+    ProbeStatus operator()(const std::string& pattern) {
+        ++probes;
+        if (pattern == failOn) return ProbeStatus::Failed;
+        for (const auto& n : names) {
+            if (match(pattern.c_str(), n.c_str())) return ProbeStatus::Hit;
+        }
+        return ProbeStatus::Miss;
+    }
+};
+
+static const std::vector<std::string_view> kDigits6(6, "0123456789");
+
+static void test_fake_card_matches_wildcards_ignoring_case() {
+    FakeFolder card{{"20260221_194046_CSL.crc"}};
+    TEST_ASSERT_TRUE(card("20260221_1*") == ProbeStatus::Hit);
+    TEST_ASSERT_TRUE(card("20260221_194046_csl.CRC") == ProbeStatus::Hit);
+    TEST_ASSERT_TRUE(card("20260221_19404?_CSL.crc") == ProbeStatus::Hit);
+    TEST_ASSERT_TRUE(card("20260221_2*") == ProbeStatus::Miss);
 }
 
-static void test_keeps_long_name_and_encoded_query() {
-    auto parsed = parseLine(kDatalogFileLine);
-    auto* file = std::get_if<File>(&parsed);
-    TEST_ASSERT_NOT_NULL(file);
-    TEST_ASSERT_EQUAL_STRING("20261118_120004_EVE.edf", file->name.c_str());
-    TEST_ASSERT_EQUAL_STRING("file=DATALOG%5C20261118%5C20261~1.EDF", file->query.c_str());
-    TEST_ASSERT_EQUAL_UINT32(808, file->sizeKb);
+static void test_expand_finds_every_timestamp() {
+    FakeFolder card{{"20260221_194046_CSL.crc", "20260221_194046_EVE.edf", "20260221_194047_BRP.edf",
+                     "20260221_231502_PLD.edf", "20260222_031502_SAD.edf", "Journal.dat"}};
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("20260221_", kDigits6, std::ref(card), found));
+    TEST_ASSERT_EQUAL_size_t(3, found.size());
+    TEST_ASSERT_EQUAL_STRING("20260221_194046", found[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("20260221_194047", found[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("20260221_231502", found[2].c_str());
 }
 
-static void test_parses_directory_line() {
-    auto parsed = parseLine(kDirLine);
-    auto* dir = std::get_if<Directory>(&parsed);
-    TEST_ASSERT_NOT_NULL(dir);
-    TEST_ASSERT_EQUAL_STRING("20261118", dir->name.c_str());
-    TEST_ASSERT_EQUAL_STRING("dir=A:%5CDATALOG%5C20261118", dir->query.c_str());
-    TEST_ASSERT_EQUAL_INT(2026, dir->modified.year);
+static void test_expand_prunes_misses() {
+    FakeFolder card{{"20260221_194046_CSL.crc"}};
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("20260221_", kDigits6, std::ref(card), found));
+    TEST_ASSERT_EQUAL_size_t(1, found.size());
+    // One hit per position, ten digits tried at each: no subtree under a miss is probed.
+    TEST_ASSERT_EQUAL_INT(60, card.probes);
 }
 
-static void test_tolerates_trailing_carriage_return() {
-    std::string line = std::string(kFileLine) + "\r";
-    TEST_ASSERT_TRUE(std::holds_alternative<File>(parseLine(line)));
+static void test_expand_empty_folder_finds_nothing() {
+    FakeFolder card;
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("20260221_", kDigits6, std::ref(card), found));
+    TEST_ASSERT_EQUAL_size_t(0, found.size());
+    TEST_ASSERT_EQUAL_INT(10, card.probes);
 }
 
-static void test_lines_without_links_are_not_entries() {
-    TEST_ASSERT_TRUE(std::holds_alternative<NotAnEntry>(parseLine("")));
-    TEST_ASSERT_TRUE(std::holds_alternative<NotAnEntry>(parseLine("<html><body><pre>")));
-    TEST_ASSERT_TRUE(std::holds_alternative<NotAnEntry>(parseLine("   ")));
+static void test_expand_stops_on_probe_failure() {
+    FakeFolder card{{"20260221_194046_CSL.crc"}};
+    card.failOn = "20260221_19*";
+    std::vector<std::string> found;
+    TEST_ASSERT_FALSE(expand("20260221_", kDigits6, std::ref(card), found));
 }
 
-static void test_unknown_size_unit_is_malformed() {
-    TEST_ASSERT_TRUE(std::holds_alternative<Malformed>(parseLine(
-        "2026-11-18   12:00:04           4MB  <a href=\"http://192.168.4.1/download?file=BIG.EDF\"> Big.edf</a>")));
+static void test_expand_settings_stems() {
+    FakeFolder card{{"AGL.tgt", "AGL.crc", "ABR.log", "XYZ.tgt"}};
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("", std::vector<std::string_view>(3, kLetters), std::ref(card), found));
+    TEST_ASSERT_EQUAL_size_t(3, found.size());
+    TEST_ASSERT_EQUAL_STRING("ABR", found[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("AGL", found[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("XYZ", found[2].c_str());
 }
 
-static void test_missing_timestamp_is_malformed() {
-    TEST_ASSERT_TRUE(std::holds_alternative<Malformed>(
-        parseLine("          64KB  <a href=\"http://192.168.4.1/download?file=JOURNAL.DAT\"> Journal.dat</a>")));
+static void test_time_alphabets_split_at_noon() {
+    // Sessions dated with the folder's date start after noon; those with the next date, before.
+    FakeFolder card{{"20260221_120000_EVE.edf", "20260221_235959_EVE.edf", "20260222_000000_EVE.edf",
+                     "20260222_115959_EVE.edf"}};
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("20260221_", timeAlphabets(false), std::ref(card), found));
+    TEST_ASSERT_TRUE(expand("20260222_", timeAlphabets(true), std::ref(card), found));
+    TEST_ASSERT_EQUAL_size_t(4, found.size());
 }
 
-static void test_unknown_link_kind_is_malformed() {
-    TEST_ASSERT_TRUE(std::holds_alternative<Malformed>(
-        parseLine("2026-11-18   12:00:04   64KB  <a href=\"http://192.168.4.1/other?x=1\"> x</a>")));
+static void test_add_days_crosses_month_year_and_leap_day() {
+    TEST_ASSERT_EQUAL_STRING("20270101", folderName(addDays(Date{2026, 12, 31}, 1)).c_str());
+    TEST_ASSERT_EQUAL_STRING("20240229", folderName(addDays(Date{2024, 2, 28}, 1)).c_str());
+    TEST_ASSERT_EQUAL_STRING("20240301", folderName(addDays(Date{2024, 2, 29}, 1)).c_str());
+    TEST_ASSERT_EQUAL_STRING("20260131", folderName(addDays(Date{2026, 2, 1}, -1)).c_str());
 }
 
-static void test_out_of_range_timestamp_is_malformed() {
-    TEST_ASSERT_TRUE(std::holds_alternative<Malformed>(
-        parseLine("2026-13-18   12:00:04   64KB  <a href=\"http://192.168.4.1/download?file=A.EDF\"> a.edf</a>")));
+static void test_days_between() {
+    TEST_ASSERT_EQUAL_INT(7, daysBetween(Date{2026, 11, 12}, Date{2026, 11, 19}));
+    TEST_ASSERT_EQUAL_INT(-1, daysBetween(Date{2027, 1, 1}, Date{2026, 12, 31}));
+}
+
+static void test_edf_start_date() {
+    auto d = parseEdfStartDate("21.02.26");
+    TEST_ASSERT_TRUE(d.has_value());
+    TEST_ASSERT_EQUAL_STRING("20260221", folderName(*d).c_str());
+    TEST_ASSERT_FALSE(parseEdfStartDate("21.13.26").has_value());
+    TEST_ASSERT_FALSE(parseEdfStartDate("21-02-26").has_value());
+    TEST_ASSERT_FALSE(parseEdfStartDate("21.02.2").has_value());
+}
+
+static void test_content_range_total() {
+    TEST_ASSERT_EQUAL_UINT64(4190420, contentRangeTotal("bytes 236-243/4190420").value());
+    TEST_ASSERT_EQUAL_UINT64(4, contentRangeTotal("bytes 0-3/4").value());
+    TEST_ASSERT_FALSE(contentRangeTotal("bytes 0-3/*").has_value());
+    TEST_ASSERT_FALSE(contentRangeTotal("").has_value());
+    TEST_ASSERT_FALSE(contentRangeTotal("bytes 0-3/12x").has_value());
+}
+
+static void test_signature_ranges() {
+    TEST_ASSERT_EQUAL_UINT32(236, signatureRange("STR.edf").first);
+    TEST_ASSERT_EQUAL_UINT32(243, signatureRange("20260221_194046_BRP.edf").last);
+    TEST_ASSERT_EQUAL_UINT32(0, signatureRange("AGL.crc").first);
+    TEST_ASSERT_EQUAL_UINT32(7, signatureRange("AGL.crc").last);
+    TEST_ASSERT_EQUAL_UINT32(0, signatureRange("AGL.tgt").last);
+    TEST_ASSERT_EQUAL_UINT32(0, signatureRange("ABR.log").last);
+    TEST_ASSERT_TRUE(keepsSignatureBytes("STR.edf"));
+    TEST_ASSERT_TRUE(keepsSignatureBytes("STR.crc"));
+    TEST_ASSERT_FALSE(keepsSignatureBytes("Identification.tgt"));
+    TEST_ASSERT_FALSE(keepsSignatureBytes("ABR.log"));
+}
+
+static void test_crc_companions() {
+    TEST_ASSERT_EQUAL_STRING("STR.crc", crcCompanion("STR.edf").c_str());
+    TEST_ASSERT_EQUAL_STRING("AGL.crc", crcCompanion("AGL.tgt").c_str());
+    TEST_ASSERT_EQUAL_STRING("", crcCompanion("ABR.log").c_str());
+    TEST_ASSERT_EQUAL_STRING("", crcCompanion("AGL.crc").c_str());
+}
+
+static void test_downloads_missing_or_changed_files() {
+    const Signature edf{4190420, "     123"};
+    TEST_ASSERT_TRUE(needsDownload(std::nullopt, edf, false));
+    TEST_ASSERT_FALSE(needsDownload(edf, edf, false));
+    TEST_ASSERT_TRUE(needsDownload(Signature{4190420, "     122"}, edf, false));
+    TEST_ASSERT_TRUE(needsDownload(Signature{4190000, "     123"}, edf, false));
+}
+
+static void test_downloads_when_companion_changed() {
+    const Signature tgt{812, ""};
+    TEST_ASSERT_TRUE(needsDownload(tgt, tgt, true));
 }
 
 static void test_lists_folders_inside_lookback() {
@@ -101,29 +187,6 @@ static void test_never_lists_non_date_folders() {
     TEST_ASSERT_FALSE(shouldListDatalogFolder("2026111", Date{2026, 11, 19}, 7, false));
     TEST_ASSERT_FALSE(shouldListDatalogFolder("2026111X", Date{2026, 11, 19}, 7, false));
     TEST_ASSERT_FALSE(shouldListDatalogFolder("20261340", Date{2026, 11, 19}, 7, false));
-}
-
-static void test_size_matches_within_kb_rounding() {
-    TEST_ASSERT_TRUE(sizeMatchesKb(808 * 1024, 808));
-    TEST_ASSERT_TRUE(sizeMatchesKb(808 * 1024 - 1023, 808));
-    TEST_ASSERT_TRUE(sizeMatchesKb(808 * 1024 + 1023, 808));
-    TEST_ASSERT_FALSE(sizeMatchesKb(808 * 1024 + 1024, 808));
-    TEST_ASSERT_FALSE(sizeMatchesKb(806 * 1024, 808));
-    TEST_ASSERT_TRUE(sizeMatchesKb(100, 0));
-}
-
-static void test_downloads_missing_or_changed_files() {
-    const int64_t when = 1795000000;
-    TEST_ASSERT_TRUE(needsDownload(std::nullopt, 808, when));
-    TEST_ASSERT_FALSE(needsDownload(LocalFile{808 * 1024, when}, 808, when));
-    TEST_ASSERT_TRUE(needsDownload(LocalFile{808 * 1024, when}, 808, when + 60));
-    TEST_ASSERT_TRUE(needsDownload(LocalFile{400 * 1024, when}, 808, when));
-}
-
-static void test_tolerates_fat_two_second_times() {
-    const int64_t odd = 1795000001;
-    TEST_ASSERT_FALSE(needsDownload(LocalFile{808 * 1024, odd - 1}, 808, odd));
-    TEST_ASSERT_TRUE(needsDownload(LocalFile{808 * 1024, odd - 3}, 808, odd));
 }
 
 static void test_safe_names() {
@@ -159,22 +222,25 @@ static void test_window() {
 
 int main() {
     UNITY_BEGIN();
-    RUN_TEST(test_parses_file_line);
-    RUN_TEST(test_keeps_long_name_and_encoded_query);
-    RUN_TEST(test_parses_directory_line);
-    RUN_TEST(test_tolerates_trailing_carriage_return);
-    RUN_TEST(test_lines_without_links_are_not_entries);
-    RUN_TEST(test_unknown_size_unit_is_malformed);
-    RUN_TEST(test_missing_timestamp_is_malformed);
-    RUN_TEST(test_unknown_link_kind_is_malformed);
-    RUN_TEST(test_out_of_range_timestamp_is_malformed);
+    RUN_TEST(test_fake_card_matches_wildcards_ignoring_case);
+    RUN_TEST(test_expand_finds_every_timestamp);
+    RUN_TEST(test_expand_prunes_misses);
+    RUN_TEST(test_expand_empty_folder_finds_nothing);
+    RUN_TEST(test_expand_stops_on_probe_failure);
+    RUN_TEST(test_expand_settings_stems);
+    RUN_TEST(test_time_alphabets_split_at_noon);
+    RUN_TEST(test_add_days_crosses_month_year_and_leap_day);
+    RUN_TEST(test_days_between);
+    RUN_TEST(test_edf_start_date);
+    RUN_TEST(test_content_range_total);
+    RUN_TEST(test_signature_ranges);
+    RUN_TEST(test_crc_companions);
+    RUN_TEST(test_downloads_missing_or_changed_files);
+    RUN_TEST(test_downloads_when_companion_changed);
     RUN_TEST(test_lists_folders_inside_lookback);
     RUN_TEST(test_lookback_crosses_month_and_year);
     RUN_TEST(test_lists_old_folders_never_copied);
     RUN_TEST(test_never_lists_non_date_folders);
-    RUN_TEST(test_size_matches_within_kb_rounding);
-    RUN_TEST(test_downloads_missing_or_changed_files);
-    RUN_TEST(test_tolerates_fat_two_second_times);
     RUN_TEST(test_safe_names);
     RUN_TEST(test_json_escape);
     RUN_TEST(test_window);
