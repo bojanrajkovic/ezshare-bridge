@@ -43,9 +43,10 @@
 #define SYNC_WINDOW_END_HOUR 18
 #endif
 
-// DATALOG folders this many days old or newer are re-listed every run.
+// DATALOG folders this many days old or newer are re-listed every run. Only the newest night
+// changes once the CPAP is off, and re-listing a night costs about 2,000 probes.
 #ifndef LOOKBACK_DAYS
-#define LOOKBACK_DAYS 7
+#define LOOKBACK_DAYS 2
 #endif
 
 // After this long on the card's network, the bridge goes home even with work left. It's long
