@@ -56,6 +56,9 @@ void setup() {
 
     WiFi.persistent(false);  // credentials are compiled in; don't wear the flash rewriting them
     WiFi.mode(WIFI_STA);
+    // Modem sleep turns the radio off between beacons. On a weak link it drops and delays enough
+    // packets to cut file downloads short, and the bridge runs on USB power anyway.
+    WiFi.setSleepMode(WIFI_NONE_SLEEP);
     WiFi.setAutoReconnect(true);
     while (!connectWifi(HOME_WIFI_SSID, HOME_WIFI_PASSWORD, JOIN_TIMEOUT_SECONDS * 1000UL)) {
         Serial.println("home network: retrying");
