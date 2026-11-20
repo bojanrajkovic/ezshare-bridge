@@ -9,6 +9,7 @@
 
 #include "config.h"
 #include "ezshare.h"
+#include "led.h"
 #include "log.h"
 #include "state.h"
 #include "sync.h"
@@ -47,6 +48,7 @@ bool syncDue() {
 void setup() {
     Serial.begin(115200);
     Serial.printf("\nezshare-bridge %s\n", BRIDGE_VERSION);
+    startLed();
 
     SDFS.setConfig(SDFSConfig(SD_CS_PIN, SPI_HALF_SPEED));
     metrics.sdOk = SDFS.begin();
@@ -84,7 +86,10 @@ void loop() {
 
     if (!syncDue()) return;
     lastSyncAttemptMs = millis() | 1;
-    runSync();
+    setLed(LedPattern::Syncing);
+    const SyncResult result = runSync();
+    // A run that ran out of time isn't a failure; the next one carries on.
+    setLed(result == SyncResult::Ok || result == SyncResult::TimeBudget ? LedPattern::Off : LedPattern::Failed);
     startMdns();  // the responder doesn't survive leaving the home network
     shipLogs();   // send what the run logged while it was on the card's network
     lastShipMs = millis();

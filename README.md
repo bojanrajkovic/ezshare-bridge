@@ -107,6 +107,16 @@ mirror with `--delete` would remove your history.
 
 The layout matches the SD card's: `STR.edf`, `Identification.*`, `SETTINGS/`, `DATALOG/<date>/`.
 
+## The LED
+
+The board's ESP-side LED (LD2, on GPIO2) shows what the bridge is doing:
+
+| Pattern | Meaning |
+|---|---|
+| A short blink every second | Syncing. The bridge is on the card's network and won't answer on yours. |
+| A double blink every 2 seconds | The last run failed. Check `/log` or `/metrics`. It clears when a run succeeds. |
+| Off | Idle, and the last run succeeded or ran out of time and will carry on next run. |
+
 ## Metrics
 
 `GET /metrics` returns Prometheus text format:
