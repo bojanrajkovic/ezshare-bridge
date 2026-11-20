@@ -1,5 +1,4 @@
 .pio/
 include/secrets.h
-include/secrets.h.bak*
 mise.local.toml
 case/out/
