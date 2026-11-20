@@ -29,8 +29,26 @@ inline constexpr std::string_view kLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 // matches. Tries "<prefix><c1>*", then extends only the hits, so a miss prunes its whole
 // subtree. Appends the results to `found` in alphabet order. Returns false as soon as a
 // probe fails.
+//
+// With `after`, a full result-length string, only results that sort after it are searched
+// for: while a guess still matches after's leading characters, characters below after's are
+// skipped. A prefix that sorts after `after` is searched whole; one that sorts before it isn't
+// searched at all.
 bool expand(const std::string& prefix, const std::vector<std::string_view>& alphabets, const Probe& probe,
-            std::vector<std::string>& found);
+            std::vector<std::string>& found, std::string_view after = {});
+
+// What a run must look at in a night folder the bridge already has whole.
+struct KnownNight {
+    std::string after;                 // the newest session time copied, "YYYYMMDD_HHMMSS"
+    std::vector<std::string> recheck;  // session times whose files can still change, oldest first
+};
+
+// Plans a run over a complete night folder from the names already copied. The CPAP names a
+// session's files by its start time, so a new file always sorts after every copied one: only
+// names after `after` need searching. Of the copied files, only the night's EVE and CSL (which
+// grow all night) and the newest session can still change. Returns nullopt when no name is a
+// session file, so the caller searches the folder whole.
+std::optional<KnownNight> planKnownNight(const std::vector<std::string>& names);
 
 // Alphabets for the HHMMSS part of a DATALOG file name. A night folder holds sessions that
 // start after noon on its date and before noon the next day, so names with the folder's

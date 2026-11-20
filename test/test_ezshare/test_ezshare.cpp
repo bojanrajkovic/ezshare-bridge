@@ -84,6 +84,70 @@ static void test_expand_stops_on_probe_failure() {
     TEST_ASSERT_FALSE(expand("20260221_", kDigits6, std::ref(card), found));
 }
 
+static void test_expand_after_finds_only_newer_names() {
+    FakeFolder card{{"20260221_194046_CSL.edf", "20260221_231502_BRP.edf", "20260221_233000_BRP.edf"}};
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("20260221_", kDigits6, std::ref(card), found, "20260221_231502"));
+    TEST_ASSERT_EQUAL_size_t(1, found.size());
+    TEST_ASSERT_EQUAL_STRING("20260221_233000", found[0].c_str());
+}
+
+static void test_expand_after_nothing_new_is_cheap() {
+    FakeFolder card{{"20260221_194046_CSL.edf", "20260221_231502_BRP.edf"}};
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("20260221_", kDigits6, std::ref(card), found, "20260221_231502"));
+    TEST_ASSERT_EQUAL_size_t(0, found.size());
+    // At most the digits at or above the bound's digit at each of the six positions.
+    TEST_ASSERT_LESS_OR_EQUAL_INT(60, card.probes);
+}
+
+static void test_expand_after_carries_past_a_nine() {
+    FakeFolder card{{"20260221_231509_BRP.edf", "20260221_231510_BRP.edf"}};
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("20260221_", kDigits6, std::ref(card), found, "20260221_231509"));
+    TEST_ASSERT_EQUAL_size_t(1, found.size());
+    TEST_ASSERT_EQUAL_STRING("20260221_231510", found[0].c_str());
+}
+
+static void test_expand_after_a_later_prefix_skips_the_search() {
+    FakeFolder card{{"20260221_231502_BRP.edf", "20260222_031502_BRP.edf"}};
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("20260221_", kDigits6, std::ref(card), found, "20260222_031502"));
+    TEST_ASSERT_EQUAL_size_t(0, found.size());
+    TEST_ASSERT_EQUAL_INT(0, card.probes);
+}
+
+static void test_expand_after_an_earlier_prefix_searches_everything() {
+    FakeFolder card{{"20260222_011502_BRP.edf", "20260222_031502_BRP.edf"}};
+    std::vector<std::string> found;
+    TEST_ASSERT_TRUE(expand("20260222_", kDigits6, std::ref(card), found, "20260221_231502"));
+    TEST_ASSERT_EQUAL_size_t(2, found.size());
+}
+
+static void test_plan_known_night() {
+    const auto plan = planKnownNight({"20260221_194046_CSL.edf", "20260221_194046_CSL.crc", "20260221_194046_EVE.edf",
+                                      "20260221_194052_BRP.edf", "20260221_231502_BRP.edf",
+                                      "20260222_031502_BRP.edf", "20260222_031502_BRP.crc", "20260222_031503_PLD.edf"});
+    TEST_ASSERT_TRUE(plan.has_value());
+    // The newest name is on the next day: the night was split at noon.
+    TEST_ASSERT_EQUAL_STRING("20260222_031503", plan->after.c_str());
+    TEST_ASSERT_EQUAL_size_t(2, plan->recheck.size());
+    TEST_ASSERT_EQUAL_STRING("20260221_194046", plan->recheck[0].c_str());  // EVE and CSL grow all night
+    TEST_ASSERT_EQUAL_STRING("20260222_031503", plan->recheck[1].c_str());  // the newest session
+}
+
+static void test_plan_known_night_only_eve_and_csl() {
+    const auto plan = planKnownNight({"20260221_194046_CSL.edf", "20260221_194046_EVE.edf"});
+    TEST_ASSERT_TRUE(plan.has_value());
+    TEST_ASSERT_EQUAL_STRING("20260221_194046", plan->after.c_str());
+    TEST_ASSERT_EQUAL_size_t(1, plan->recheck.size());
+}
+
+static void test_plan_known_night_without_session_files() {
+    TEST_ASSERT_FALSE(planKnownNight({}).has_value());
+    TEST_ASSERT_FALSE(planKnownNight({"notes.txt", "STR.edf"}).has_value());
+}
+
 static void test_expand_settings_stems() {
     FakeFolder card{{"AGL.tgt", "AGL.crc", "ABR.log", "XYZ.tgt"}};
     std::vector<std::string> found;
@@ -265,6 +329,14 @@ int main() {
     RUN_TEST(test_expand_empty_folder_finds_nothing);
     RUN_TEST(test_expand_stops_on_probe_failure);
     RUN_TEST(test_expand_settings_stems);
+    RUN_TEST(test_expand_after_finds_only_newer_names);
+    RUN_TEST(test_expand_after_nothing_new_is_cheap);
+    RUN_TEST(test_expand_after_carries_past_a_nine);
+    RUN_TEST(test_expand_after_a_later_prefix_skips_the_search);
+    RUN_TEST(test_expand_after_an_earlier_prefix_searches_everything);
+    RUN_TEST(test_plan_known_night);
+    RUN_TEST(test_plan_known_night_only_eve_and_csl);
+    RUN_TEST(test_plan_known_night_without_session_files);
     RUN_TEST(test_time_alphabets_split_at_noon);
     RUN_TEST(test_add_days_crosses_month_year_and_leap_day);
     RUN_TEST(test_days_between);

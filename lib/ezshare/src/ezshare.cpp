@@ -1,5 +1,6 @@
 #include "ezshare.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 
@@ -58,29 +59,65 @@ bool parseFolderDate(std::string_view name, Date& out) {
     return validDate(out);
 }
 
+// `after` is empty when the search is unbounded, or the bound when `prefix` still equals its
+// leading characters.
 bool expandFrom(std::string& prefix, const std::vector<std::string_view>& alphabets, size_t level,
-                const Probe& probe, std::vector<std::string>& found) {
+                const Probe& probe, std::vector<std::string>& found, std::string_view after) {
     if (level == alphabets.size()) {
-        found.push_back(prefix);
+        if (after.empty()) found.push_back(prefix);  // equal to a bound: not after it
         return true;
     }
+    const char floor = after.empty() ? '\0' : after[prefix.size()];
     for (char c : alphabets[level]) {
+        if (c < floor) continue;
         prefix.push_back(c);
         const ProbeStatus s = probe(prefix + "*");
         bool ok = s != ProbeStatus::Failed;
-        if (s == ProbeStatus::Hit) ok = expandFrom(prefix, alphabets, level + 1, probe, found);
+        if (s == ProbeStatus::Hit) {
+            ok = expandFrom(prefix, alphabets, level + 1, probe, found, c == floor ? after : std::string_view{});
+        }
         prefix.pop_back();
         if (!ok) return false;
     }
     return true;
 }
 
+bool isSessionName(std::string_view name) {
+    // YYYYMMDD_HHMMSS_XXX.ext
+    return name.size() >= 19 && allDigits(name.substr(0, 8)) && name[8] == '_' &&
+           allDigits(name.substr(9, 6)) && name[15] == '_';
+}
+
 }  // namespace
 
 bool expand(const std::string& prefix, const std::vector<std::string_view>& alphabets, const Probe& probe,
-            std::vector<std::string>& found) {
+            std::vector<std::string>& found, std::string_view after) {
+    if (!after.empty()) {
+        const int c = after.substr(0, prefix.size()).compare(prefix);
+        if (c > 0) return true;  // every result sorts before the bound
+        if (c < 0) after = {};   // every result sorts after it
+    }
     std::string p = prefix;
-    return expandFrom(p, alphabets, 0, probe, found);
+    return expandFrom(p, alphabets, 0, probe, found, after);
+}
+
+std::optional<KnownNight> planKnownNight(const std::vector<std::string>& names) {
+    std::string newest;
+    std::vector<std::string> growing;
+    for (const auto& name : names) {
+        if (!isSessionName(name)) continue;
+        const std::string stamp = name.substr(0, 15);
+        if (stamp > newest) newest = stamp;
+        const std::string_view type = std::string_view(name).substr(16, 3);
+        if ((type == "EVE" || type == "CSL") &&
+            std::find(growing.begin(), growing.end(), stamp) == growing.end()) {
+            growing.push_back(stamp);
+        }
+    }
+    if (newest.empty()) return std::nullopt;
+    std::sort(growing.begin(), growing.end());
+    if (std::find(growing.begin(), growing.end(), newest) == growing.end()) growing.push_back(newest);
+    return KnownNight{newest, growing};
 }
 
 std::vector<std::string_view> timeAlphabets(bool nextDay) {
