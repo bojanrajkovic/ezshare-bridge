@@ -45,6 +45,10 @@ void sendIndex(const String& path) {
     server.sendContent("");
 }
 
+// A write gives up after this long without progress. The default 5 s cut downloads short on a
+// lossy link, and the puller can't resume them.
+constexpr uint32_t kWriteTimeoutMs = 30000;
+
 void sendFile(const String& path) {
     fs::File f = SDFS.open(path, "r");
     if (!f) {
@@ -56,6 +60,7 @@ void sendFile(const String& path) {
         server.setContentLength(f.size());
         server.send(200, "application/octet-stream", "");
     } else {
+        server.client().setTimeout(kWriteTimeoutMs);
         server.streamFile(f, "application/octet-stream");
     }
     f.close();
@@ -166,6 +171,7 @@ void handleLog() {
         server.send(404, "text/plain", "no log yet\n");
         return;
     }
+    server.client().setTimeout(kWriteTimeoutMs);
     server.streamFile(f, "application/x-ndjson");
     f.close();
 }
