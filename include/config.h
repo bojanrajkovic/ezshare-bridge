@@ -43,10 +43,11 @@
 #define SYNC_WINDOW_END_HOUR 18
 #endif
 
-// DATALOG folders this many days old or newer are re-listed every run. Only the newest night
-// changes once the CPAP is off, and re-listing a night costs about 2,000 probes.
+// DATALOG folders this many days old or newer are checked every run. A night the bridge has
+// whole costs a few dozen probes: only its newest session and its EVE and CSL are re-checked,
+// and only names after its newest file are searched for.
 #ifndef LOOKBACK_DAYS
-#define LOOKBACK_DAYS 2
+#define LOOKBACK_DAYS 7
 #endif
 
 // After this long on the card's network, the bridge goes home even with work left. It's long

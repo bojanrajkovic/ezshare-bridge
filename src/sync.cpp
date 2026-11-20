@@ -331,6 +331,16 @@ void syncSettings(Run& run) {
 // Copies one night's folder. A folder the bridge doesn't have yet is copied into a hidden
 // .<date> folder and renamed when the run finishes it with no failures, so an unfinished
 // copy is never mistaken for a finished one, and the puller sees a night all at once.
+// The names of the files in a folder on the microSD.
+std::vector<std::string> localNames(const String& path) {
+    std::vector<std::string> names;
+    fs::Dir dir = SDFS.openDir(path);
+    while (dir.next()) {
+        if (dir.isFile()) names.emplace_back(dir.fileName().c_str());
+    }
+    return names;
+}
+
 void syncNight(ezshare::Date night, Run& run) {
     const std::string name = ezshare::folderName(night);
     const String finalPath = String("/DATALOG/") + name.c_str();
@@ -342,11 +352,20 @@ void syncNight(ezshare::Date night, Run& run) {
     run.folders++;
     const uint32_t failuresBefore = run.failures;
 
+    // A finished night is complete up to its newest file, so only newer names are searched for.
+    // A staged one may have gaps where a copy failed, so it's searched whole.
     std::vector<std::string> stamps;
+    std::string after;
+    if (!staged) {
+        if (const auto plan = ezshare::planKnownNight(localNames(folder.local))) {
+            after = plan->after;
+            stamps = plan->recheck;
+        }
+    }
     const auto exists = [&](const std::string& p) { return probeExists(folder, p, run); };
-    if (!ezshare::expand(name + "_", ezshare::timeAlphabets(false), exists, stamps)) return;
+    if (!ezshare::expand(name + "_", ezshare::timeAlphabets(false), exists, stamps, after)) return;
     const std::string nextDay = ezshare::folderName(ezshare::addDays(night, 1));
-    if (!ezshare::expand(nextDay + "_", ezshare::timeAlphabets(true), exists, stamps)) return;
+    if (!ezshare::expand(nextDay + "_", ezshare::timeAlphabets(true), exists, stamps, after)) return;
 
     SDFS.mkdir(folder.local);
     for (const auto& stamp : stamps) {

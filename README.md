@@ -213,7 +213,7 @@ Everything besides credentials has a default in `include/config.h`. Override any
 | `NTP_SERVER` | `pool.ntp.org` | |
 | `SYNC_INTERVAL_MINUTES` | `60` | |
 | `SYNC_WINDOW_START_HOUR`, `SYNC_WINDOW_END_HOUR` | `9`, `18` | Local hours when syncs may run. Keeps the bridge off the card overnight. |
-| `LOOKBACK_DAYS` | `2` | `DATALOG` folders this recent are checked every run; each costs about 2,000 probes |
+| `LOOKBACK_DAYS` | `7` | `DATALOG` folders this recent are checked every run |
 | `SYNC_TIME_BUDGET_SECONDS` | `5400` | A run goes home after this long, even with files left, so a hung run can't keep the bridge unreachable |
 | `JOIN_TIMEOUT_SECONDS` | `30` | |
 
@@ -293,6 +293,17 @@ puller never sees a partial file. A transfer that stalls or comes up short resum
 writing to them. A night the bridge doesn't have yet is copied into a hidden `.<date>` folder
 and renamed when a run finishes it without failures. Older nights the bridge has are skipped,
 so later runs stay short as the card fills up.
+
+Finding a night's names costs about 2,000 probes, so a night is searched whole only until the
+bridge has all of it. After that, a run reads the folder's names from the microSD and:
+
+- searches only for names after the newest one it has. The CPAP names a session's files by its
+  start time, so a new file always sorts after the ones already copied;
+- re-checks only the files that can still change: the night's `EVE` and `CSL`, which grow all
+  night, and the newest session's.
+
+That's a few dozen probes per night. A staged night is always searched whole, since a failed
+copy can leave a gap that a search from the newest name would never revisit.
 
 ## Development
 
