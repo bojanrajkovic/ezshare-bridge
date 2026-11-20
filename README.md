@@ -229,8 +229,10 @@ Range: bytes=<first>-<last>
   the whole file when the range covers all of it (a 4–8 byte `.crc`). No match answers `404`
   within a few milliseconds. Neither names the file that matched.
 - `Last-Modified` is always in 1990, so the bridge ignores it.
-- After about a thousand requests in a few minutes, the card answers `503` to everyone until
-  it's power-cycled. The bridge spaces requests at least 100 ms apart, and backs off on a `503`.
+- After about a thousand connections in a few minutes, the card answers `503` to any request
+  that opens a file, while misses still get `404`. It recovers within about 10 minutes. The
+  card supports keep-alive, so the bridge sends all its probes over one connection. It also
+  spaces requests at least 100 ms apart and backs off on a `503`.
 - `HTTPClient::writeToStream` stops after the first 512 bytes of every larger file when writing
   to the microSD, so the bridge copies response bodies a sector at a time itself.
 

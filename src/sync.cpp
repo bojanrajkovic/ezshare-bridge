@@ -57,8 +57,8 @@ struct ProbeReply {
     Signature signature;  // set on a hit
 };
 
-// The card runs out of connections after about a thousand requests in a few minutes and then
-// answers 503 until it's power-cycled, so requests are spaced at least this far apart.
+// The card struggles with bursts of requests (see probeClient), so they're spaced at least this
+// far apart.
 constexpr uint32_t kRequestSpacingMs = 100;
 
 void paceRequests() {
@@ -74,14 +74,23 @@ String downloadUrl(const Folder& folder, const std::string& fname) {
     return String("http://" EZSHARE_HOST "/download?fname=") + fname.c_str() + "&fdir=" + folder.fdir;
 }
 
+// Probes share one kept-alive connection. With a new connection per probe, the card piled up
+// closing connections, and after about a thousand it answered 503 to every request that opens
+// a file, until they timed out.
+WiFiClient probeClient;
+HTTPClient probeHttp;
+
+void closeProbeConnection() {
+    probeHttp.end();
+    probeClient.stop();
+}
+
 // Asks the card for the bytes at signatureRange(pattern) of the first file matching
 // `pattern`. 206 is a hit, 404 a miss, anything else a failure.
 ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
     const ezshare::ByteRange range = ezshare::signatureRange(pattern);
     static const char* kHeaders[] = {"Content-Range"};
-
-    WiFiClient client;
-    HTTPClient http;
+    HTTPClient& http = probeHttp;
     int code = -1;
     // Retry what's likely to pass on a second try: a 503 (the card is busy), or a connection
     // that failed or timed out (a weak signal). Each retry waits twice as long.
@@ -89,21 +98,22 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
         run.probes++;
         metrics.probes++;
         paceRequests();
-        http.setReuse(false);
+        http.setReuse(true);
         http.setTimeout(kProbeTimeoutMs);
         code = -1;
-        if (http.begin(client, downloadUrl(folder, pattern))) {
+        if (http.begin(probeClient, downloadUrl(folder, pattern))) {
             http.addHeader("Range", "bytes=" + String(range.first) + "-" + String(range.last));
             http.collectHeaders(kHeaders, 1);
             code = http.GET();
         }
         if (code != HTTP_CODE_SERVICE_UNAVAILABLE && code >= 0) break;
-        http.end();
+        closeProbeConnection();
         delay(backoffMs);
     }
     ProbeReply reply{ProbeStatus::Failed, {}};
     if (code == HTTP_CODE_NOT_FOUND) {
         reply.status = ProbeStatus::Miss;
+        http.getString();  // read the error page, so the connection can carry the next probe
     } else if (code == HTTP_CODE_PARTIAL_CONTENT) {
         const String cr = http.header("Content-Range");
         const String body = http.getString();
@@ -123,11 +133,12 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
             reply.signature.bytes.assign(body.c_str() + range.first, body.length() - range.first);
         }
     }
-    http.end();
-
     if (reply.status == ProbeStatus::Failed) {
+        closeProbeConnection();  // an unread or unexpected body would corrupt the next reply
         logEvent("error", "probe_failed", {text("pattern", pattern.c_str()), text("folder", folder.local.isEmpty() ? String("/") : folder.local), num("status", code)});
         run.fail(SyncResult::ProbeFailed);
+    } else {
+        http.end();  // keeps the connection open
     }
     return reply;
 }
@@ -424,6 +435,7 @@ SyncResult runSync() {
         syncRoot(run);
         syncSettings(run);
         syncDatalog(run);
+        closeProbeConnection();
     }
 
     // Autoreconnect keeps retrying the home network if this attempt times out.
