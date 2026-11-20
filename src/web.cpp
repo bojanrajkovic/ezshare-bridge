@@ -129,14 +129,14 @@ void handleMetrics() {
     metric(out, "ezshare_bridge_files_downloaded_total", "counter", "Files copied from the card.");
     out += "ezshare_bridge_files_downloaded_total " + String(metrics.filesDownloaded) + "\n";
     metric(out, "ezshare_bridge_bytes_downloaded_total", "counter", "Bytes copied from the card.");
-    out += "ezshare_bridge_bytes_downloaded_total " + String(static_cast<double>(metrics.bytesDownloaded), 0) + "\n";
+    out += "ezshare_bridge_bytes_downloaded_total " + String(static_cast<unsigned long long>(metrics.bytesDownloaded)) + "\n";
     metric(out, "ezshare_bridge_pending_files", "gauge", "Files the last sync left to copy.");
     out += "ezshare_bridge_pending_files " + String(metrics.pendingFiles) + "\n";
 
     metric(out, "ezshare_bridge_sd_ok", "gauge", "Whether the bridge's microSD mounted.");
     out += "ezshare_bridge_sd_ok " + String(metrics.sdOk ? 1 : 0) + "\n";
     metric(out, "ezshare_bridge_sd_free_bytes", "gauge", "Free space on the bridge's microSD after the last sync.");
-    out += "ezshare_bridge_sd_free_bytes " + String(static_cast<double>(metrics.sdFreeBytes), 0) + "\n";
+    out += "ezshare_bridge_sd_free_bytes " + String(static_cast<unsigned long long>(metrics.sdFreeBytes)) + "\n";
 
     metric(out, "ezshare_bridge_wifi_rssi_dbm", "gauge", "Signal strength by network.");
     out += "ezshare_bridge_wifi_rssi_dbm{network=\"home\"} " + String(WiFi.RSSI()) + "\n";

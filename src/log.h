@@ -13,7 +13,7 @@ struct LogField {
 };
 
 inline LogField text(const char* key, const String& value) { return {key, value, true}; }
-inline LogField num(const char* key, int64_t value) { return {key, String(static_cast<double>(value), 0), false}; }
+inline LogField num(const char* key, int64_t value) { return {key, String(static_cast<long long>(value)), false}; }
 
 // Writes one JSON line to the serial console and appends it to /.bridge/log.txt on the
 // microSD. `level` is one of debug, info, warn, error, fatal.
