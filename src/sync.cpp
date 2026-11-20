@@ -515,7 +515,8 @@ SyncResult runSync() {
              {text("result", resultLabel(run.result)), num("files", metrics.filesDownloaded - filesBefore),
               num("bytes", static_cast<int64_t>(metrics.bytesDownloaded - bytesBefore)), num("pending", run.pending),
               num("probes", run.probes), num("folders", run.folders), num("seconds", metrics.lastSyncSeconds),
-              num("ezshare_rssi", metrics.ezshareRssi), num("lookback_days", LOOKBACK_DAYS)});
+              num("ezshare_rssi", metrics.ezshareRssi), num("home_rssi", WiFi.RSSI()),
+              num("lookback_days", LOOKBACK_DAYS)});
     setLogRun(0);
     return run.result;
 }

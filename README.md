@@ -176,7 +176,7 @@ survives restarts (`/.bridge/runs`), so one run's lines can be read together.
 |---|---|
 | `boot` | `version`, `reset_reason`, `ip`, `sd_ok`, `lookback_days` |
 | `copied` | `path`, `bytes`, `ms` (from the first request to the rename) |
-| `sync` | `result`, `files`, `bytes`, `pending`, `probes`, `folders` (night folders found on the card), `seconds`, `ezshare_rssi`, `lookback_days` |
+| `sync` | `result`, `files`, `bytes`, `pending`, `probes`, `folders` (night folders found on the card), `seconds`, `ezshare_rssi` (the card's signal when the run joined it), `home_rssi` (the home network's, after rejoining), `lookback_days` |
 | `join_failed` | `ssid`, `wifi_status` |
 | `probe_failed` | `pattern`, `folder`, `status` (the HTTP status, or a negative client error) |
 | `download_stalled` | `path`, `bytes` (in `<name>.part` so far), `total`, `cause` (`sd_short_write`, `timeout` or `closed`), and on a short write `chunk` and `written`; the bridge resumes from there |
