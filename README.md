@@ -237,8 +237,13 @@ Each run works through the card in this order, and stops when `SYNC_TIME_BUDGET_
 flowchart TD
     Root["Root: Identification.tgt/.crc, STR.edf/.crc"] --> Settings["SETTINGS/: three-letter stems A–Z, then .tgt, .crc, .log"]
     Settings --> Recent["DATALOG/: today back through LOOKBACK_DAYS"]
-    Recent --> Backfill["DATALOG/: older nights not yet copied, back to STR.edf's start date"]
+    Recent --> Backfill["DATALOG/: older nights not yet copied or checked, back to STR.edf's start date"]
 ```
+
+Backfill runs once per card history: when a run visits every older night without a failure, the
+bridge records the newest of them in `/.bridge/backfilled` and later runs start the day after it.
+Otherwise a card that holds only recent nights, while its `STR.edf` goes back a year, would get a
+probe for each missing night on every run.
 
 Names follow ResMed's conventions, and the bridge saves them in that case:
 
