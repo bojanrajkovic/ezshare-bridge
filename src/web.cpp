@@ -170,13 +170,31 @@ void handleLog() {
     f.close();
 }
 
+bool restartRequested = false;
+
+// Restarting starts a sync right away. The OTA password guards it, so another device on the
+// network can't keep the bridge restarting and syncing.
+void handleRestart() {
+    if (!server.authenticate("bridge", OTA_PASSWORD)) return server.requestAuthentication();
+    logEvent("info", "restart_requested", {});
+    server.send(202, "text/plain", "restarting\n");
+    restartRequested = true;
+}
+
 }  // namespace
 
 void startWeb() {
     server.on("/metrics", HTTP_GET, handleMetrics);
     server.on("/log", HTTP_GET, handleLog);
+    server.on("/restart", HTTP_POST, handleRestart);
     server.onNotFound(handleFiles);
     server.begin();
 }
 
-void handleWeb() { server.handleClient(); }
+void handleWeb() {
+    server.handleClient();
+    if (restartRequested) {
+        delay(200);  // let the reply reach the client
+        ESP.restart();
+    }
+}

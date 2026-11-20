@@ -28,6 +28,16 @@ EZB_OTA_PASSWORD="$(sed -n 's/^#define OTA_PASSWORD "\(.*\)"$/\1/p' include/secr
   uvx --from platformio==6.2.0 pio run -e nonpro-ota -t upload --upload-port "${usage_host}"
 '''
 
+[tasks.restart]
+description = "Restart the bridge, which starts a sync: mise run restart <ip or hostname>"
+usage = 'arg "<host>"'
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+password="$(sed -n 's/^#define OTA_PASSWORD "\(.*\)"$/\1/p' include/secrets.h)"
+curl -fsS -m 10 -X POST -u "bridge:${password}" "http://${usage_host}/restart"
+'''
+
 [tasks.monitor]
 description = "Serial console over USB"
 run = "uvx --from platformio==6.2.0 pio device monitor -e nonpro"

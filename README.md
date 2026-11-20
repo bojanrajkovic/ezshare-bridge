@@ -117,6 +117,12 @@ The board's ESP-side LED (LD2, on GPIO2) shows what the bridge is doing:
 | A double blink every 2 seconds | The last run failed. It stops after 5 minutes; check the logs or `/metrics` for why. |
 | Off | Idle, and the last run succeeded or ran out of time and will carry on next run. |
 
+## Restarting
+
+`mise run restart <host>` restarts the bridge, which starts a sync right away. It sends
+`POST /restart` with the user `bridge` and the OTA password from `include/secrets.h`. A
+restart doesn't power-cycle the ez Share card; only the CPAP can do that.
+
 ## Metrics
 
 `GET /metrics` returns Prometheus text format:
