@@ -119,7 +119,7 @@ The layout matches the SD card's: `STR.edf`, `Identification.*`, `SETTINGS/`, `D
 | `ezshare_bridge_files_downloaded_total`, `ezshare_bridge_bytes_downloaded_total` | Copied from the card |
 | `ezshare_bridge_probes_total` | Requests that asked the card whether a file exists |
 | `ezshare_bridge_pending_files` | Work the last run left for the next one: files, or a folder it didn't reach |
-| `ezshare_bridge_sd_ok`, `ezshare_bridge_sd_free_bytes` | The bridge's microSD |
+| `ezshare_bridge_sd_ok`, `ezshare_bridge_sd_free_bytes` | The bridge's microSD. Free space takes a full scan of the card's FAT, so it's measured after each sync and missing until the first one. |
 | `ezshare_bridge_wifi_rssi_dbm{network}` | Signal on your network (`home`) and the card's (`ezshare`, as of the last run) |
 | `ezshare_bridge_uptime_seconds`, `ezshare_bridge_free_heap_bytes`, `ezshare_bridge_build_info{version}` | Device health |
 

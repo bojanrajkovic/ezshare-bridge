@@ -139,8 +139,10 @@ void handleMetrics() {
 
     metric(out, "ezshare_bridge_sd_ok", "gauge", "Whether the bridge's microSD mounted.");
     out += "ezshare_bridge_sd_ok " + String(metrics.sdOk ? 1 : 0) + "\n";
-    metric(out, "ezshare_bridge_sd_free_bytes", "gauge", "Free space on the bridge's microSD after the last sync.");
-    out += "ezshare_bridge_sd_free_bytes " + String(static_cast<unsigned long long>(metrics.sdFreeBytes)) + "\n";
+    if (metrics.sdFreeMeasured) {
+        metric(out, "ezshare_bridge_sd_free_bytes", "gauge", "Free space on the bridge's microSD after the last sync.");
+        out += "ezshare_bridge_sd_free_bytes " + String(static_cast<unsigned long long>(metrics.sdFreeBytes)) + "\n";
+    }
 
     metric(out, "ezshare_bridge_wifi_rssi_dbm", "gauge", "Signal strength by network.");
     out += "ezshare_bridge_wifi_rssi_dbm{network=\"home\"} " + String(WiFi.RSSI()) + "\n";

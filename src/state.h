@@ -36,6 +36,7 @@ struct Metrics {
     uint32_t probes = 0;
     uint32_t lastSyncSeconds = 0;
     uint64_t sdFreeBytes = 0;
+    bool sdFreeMeasured = false;  // free space costs a full FAT scan, so it's measured only after a sync
     bool sdOk = false;
     int32_t ezshareRssi = 0;
     bool ezshareSeen = false;

@@ -286,7 +286,10 @@ void syncDatalog(Run& run) {
 
 void updateSdFree() {
     fs::FSInfo64 info;
-    if (SDFS.info64(info)) metrics.sdFreeBytes = info.totalBytes - info.usedBytes;
+    if (SDFS.info64(info)) {
+        metrics.sdFreeBytes = info.totalBytes - info.usedBytes;
+        metrics.sdFreeMeasured = true;
+    }
 }
 
 }  // namespace
