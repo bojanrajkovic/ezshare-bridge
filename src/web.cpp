@@ -170,41 +170,11 @@ void handleLog() {
     f.close();
 }
 
-// Lines not yet acknowledged, for a shipper that prints them and then POSTs /log/ack with
-// the X-Log-End value. A shipper that dies before acknowledging gets the same lines again.
-void handleUnshipped() {
-    fs::File f;
-    uint32_t end = 0;
-    if (!openUnshipped(f, end)) {
-        server.sendHeader("X-Log-End", "0");
-        server.send(200, "application/x-ndjson", "");
-        return;
-    }
-    server.sendHeader("X-Log-End", String(end));
-    server.setContentLength(end - f.position());
-    server.send(200, "application/x-ndjson", "");
-    server.client().write(f);
-    f.close();
-}
-
-void handleAck() {
-    const String arg = server.arg("offset");
-    char* rest = nullptr;
-    const unsigned long offset = strtoul(arg.c_str(), &rest, 10);
-    if (arg.isEmpty() || *rest != '\0' || !ackShipped(static_cast<uint32_t>(offset))) {
-        server.send(400, "text/plain", "offset must be between the last acknowledged offset and the end of the log\n");
-        return;
-    }
-    server.send(204);
-}
-
 }  // namespace
 
 void startWeb() {
     server.on("/metrics", HTTP_GET, handleMetrics);
     server.on("/log", HTTP_GET, handleLog);
-    server.on("/log/unshipped", HTTP_GET, handleUnshipped);
-    server.on("/log/ack", HTTP_POST, handleAck);
     server.onNotFound(handleFiles);
     server.begin();
 }

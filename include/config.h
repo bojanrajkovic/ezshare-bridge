@@ -58,6 +58,14 @@
 #endif
 
 // FYSETC SD-WIFI (non-Pro): microSD on the hardware SPI bus (SCK 14, MISO 12, MOSI 13).
+// Syslog receiver for log lines (RFC 5424 over UDP). Empty turns shipping off.
+#ifndef SYSLOG_HOST
+#define SYSLOG_HOST ""
+#endif
+#ifndef SYSLOG_PORT
+#define SYSLOG_PORT 514
+#endif
+
 #ifndef SD_CS_PIN
 #define SD_CS_PIN 4
 #endif

@@ -20,6 +20,8 @@ namespace {
 
 // 0 means no run yet. Set from millis() with the low bit forced on, so it's never 0.
 uint32_t lastSyncAttemptMs = 0;
+uint32_t lastShipMs = 0;
+constexpr uint32_t kShipIntervalMs = 10000;
 
 void startMdns() {
     MDNS.end();
@@ -75,8 +77,15 @@ void loop() {
     ArduinoOTA.handle();
     MDNS.update();
 
+    if (millis() - lastShipMs >= kShipIntervalMs) {
+        lastShipMs = millis();
+        shipLogs();
+    }
+
     if (!syncDue()) return;
     lastSyncAttemptMs = millis() | 1;
     runSync();
     startMdns();  // the responder doesn't survive leaving the home network
+    shipLogs();   // send what the run logged while it was on the card's network
+    lastShipMs = millis();
 }

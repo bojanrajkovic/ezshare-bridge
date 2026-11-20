@@ -59,7 +59,7 @@ or write it from 1Password with `mise run secrets`. That needs two items:
 
 - one with fields labelled `wifi_network` and `wifi_password` for your network;
 - one with fields labelled `ezshare_ssid`, `ezshare_password` (the card's defaults are
-  `ez Share` and `88888888`), `ota_password` and, optionally, `hostname`.
+  `ez Share` and `88888888`), `ota_password` and, optionally, `hostname` and `syslog_host`.
 
 Put their IDs in `mise.local.toml`, which is gitignored:
 
@@ -159,24 +159,26 @@ its microSD: boot, each sync run's outcome, and every failure with its details.
 `ts` is empty until NTP answers; `up` (seconds since boot) orders lines regardless. `level` is
 one of `debug`, `info`, `warn`, `error`, `fatal`.
 
-| Endpoint | Returns |
-|---|---|
-| `GET /log` | The current log file |
-| `GET /log/unshipped` | Lines not yet acknowledged, with an `X-Log-End` header |
-| `POST /log/ack?offset=<X-Log-End>` | Marks those lines shipped |
+`GET /log` returns the current log file.
 
-To forward the log somewhere, fetch `/log/unshipped`, store or print the lines, then
-acknowledge `X-Log-End`. A shipper that dies before acknowledging gets the same lines again,
-so nothing is lost and the worst case is a duplicate:
+### Shipping to syslog
 
-```bash
-curl -fsS -D headers.txt http://<bridge>/log/unshipped   # the lines, on stdout
-end=$(tr -d '\r' < headers.txt | awk 'tolower($1) == "x-log-end:" {print $2}')
-curl -fsS -X POST "http://<bridge>/log/ack?offset=${end}"
+Set `SYSLOG_HOST` and the bridge sends each line as RFC 5424 syslog over UDP, whenever it's on
+your network: right after each sync, and every 10 seconds otherwise. The file is the buffer.
+Lines logged while the bridge is on the card's network wait there and go out when it's back.
+
+```
+<134>1 2026-11-20T14:00:41Z ezshare-bridge ezshare-bridge - - - {"ts":"2026-11-20T14:00:41Z",...}
 ```
 
-The file rotates to `log.1.txt` at 256 KB once every line has been shipped, or at 1 MB
-regardless if nothing is acknowledging it.
+The priority is facility local0 plus the line's `level`. The timestamp is the line's `ts`, or
+`-` before NTP answers. The hostname is `BRIDGE_HOSTNAME`, the app name `ezshare-bridge`, and the
+message the JSON line itself. A line can reach the receiver minutes after it was logged, so use
+the syslog timestamp rather than the time it arrived.
+
+UDP has no acknowledgement: a datagram lost on the network is gone from the receiver, but stays
+in the file. The file rotates to `log.1.txt` at 256 KB once every line has been sent, or at 1 MB
+regardless if nothing is sending (`SYSLOG_HOST` empty).
 
 ## Configuration
 
@@ -185,7 +187,8 @@ Everything besides credentials has a default in `include/config.h`. Override any
 
 | Setting | Default | |
 |---|---|---|
-| `BRIDGE_HOSTNAME` | `ezshare-bridge` | DHCP and mDNS name |
+| `BRIDGE_HOSTNAME` | `ezshare-bridge` | DHCP and mDNS name, and the syslog hostname |
+| `SYSLOG_HOST`, `SYSLOG_PORT` | empty, `514` | Where to send log lines over UDP. Empty turns shipping off. |
 | `TZ_STRING` | `EST5EDT,M3.2.0,M11.1.0` | POSIX time zone of the CPAP's clock |
 | `NTP_SERVER` | `pool.ntp.org` | |
 | `SYNC_INTERVAL_MINUTES` | `60` | |

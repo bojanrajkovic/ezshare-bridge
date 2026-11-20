@@ -1,8 +1,11 @@
 #include "log.h"
 
+#include <ESP8266WiFi.h>
 #include <SDFS.h>
+#include <WiFiUdp.h>
 #include <time.h>
 
+#include "config.h"
 #include "ezshare.h"
 #include "state.h"
 
@@ -12,7 +15,7 @@ constexpr const char* kLogPath = "/.bridge/log.txt";
 constexpr const char* kOldLogPath = "/.bridge/log.1.txt";
 constexpr const char* kShippedPath = "/.bridge/log.shipped";
 
-// The log rotates once it's this big and every line has been shipped...
+// The log rotates once it's this big and every line has been shipped to syslog...
 constexpr size_t kRotateBytes = 256 * 1024;
 // ...or at this size regardless, if shipping has stopped.
 constexpr size_t kHardCapBytes = 1024 * 1024;
@@ -92,22 +95,60 @@ void logEvent(const char* level, const char* event, std::initializer_list<LogFie
     maybeRotate(size);
 }
 
-bool openUnshipped(fs::File& file, uint32_t& end) {
-    file = SDFS.open(kLogPath, "r");
-    if (!file) return false;
-    end = static_cast<uint32_t>(file.size());
-    uint32_t start = readShipped();
-    if (start > end) start = 0;  // the file was replaced by hand
-    file.seek(start);
-    return true;
+namespace {
+
+// The value of "key":"..." in one of our own log lines, which never escape these fields.
+String field(const String& line, const char* key) {
+    const String marker = String("\"") + key + "\":\"";
+    const int start = line.indexOf(marker);
+    if (start < 0) return "";
+    const int from = start + marker.length();
+    const int end = line.indexOf('"', from);
+    return end < 0 ? "" : line.substring(from, end);
 }
 
-bool ackShipped(uint32_t offset) {
+// RFC 5424 severity for our level names; facility is local0 (16).
+int priority(const String& level) {
+    int severity = 6;  // info
+    if (level == "debug") severity = 7;
+    else if (level == "warn") severity = 4;
+    else if (level == "error") severity = 3;
+    else if (level == "fatal") severity = 2;
+    return 16 * 8 + severity;
+}
+
+}  // namespace
+
+void shipLogs() {
+    if (strlen(SYSLOG_HOST) == 0 || !metrics.sdOk || WiFi.status() != WL_CONNECTED) return;
+    static IPAddress target;
+    if (!target.isSet() && !WiFi.hostByName(SYSLOG_HOST, target)) return;
+
     fs::File f = SDFS.open(kLogPath, "r");
-    const uint32_t size = f ? static_cast<uint32_t>(f.size()) : 0;
-    if (f) f.close();
-    if (offset > size || offset < readShipped()) return false;
-    return writeShipped(offset);
+    if (!f) return;
+    uint32_t offset = readShipped();
+    if (offset > f.size()) offset = 0;  // the file was replaced by hand
+    if (offset == f.size()) {
+        f.close();
+        return;
+    }
+    f.seek(offset);
+
+    WiFiUDP udp;
+    // A batch per call keeps the web server responsive while a long backlog drains.
+    for (int sent = 0; sent < 50 && f.available(); ++sent) {
+        const String line = f.readStringUntil('\n');  // logEvent writes whole lines, so each ends in \n
+        offset = f.position();
+        if (line.isEmpty()) continue;
+        const String ts = field(line, "ts");
+        udp.beginPacket(target, SYSLOG_PORT);
+        udp.printf("<%d>1 %s %s ezshare-bridge - - - ", priority(field(line, "level")), ts.isEmpty() ? "-" : ts.c_str(),
+                   BRIDGE_HOSTNAME);
+        udp.print(line);
+        udp.endPacket();
+    }
+    f.close();
+    writeShipped(offset);
 }
 
 fs::File openLog() { return SDFS.open(kLogPath, "r"); }

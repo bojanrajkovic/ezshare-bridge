@@ -4,7 +4,7 @@
 #   EZB_OP_VAULT       vault ID holding both items
 #   EZB_WIFI_ITEM      item with fields labelled wifi_network and wifi_password (home network)
 #   EZB_BRIDGE_ITEM    item with fields labelled ezshare_ssid, ezshare_password, ota_password,
-#                      and optionally hostname
+#                      and optionally hostname and syslog_host
 #
 # Set them in mise.local.toml. Signs in with the real `op` first, so you type your password
 # once per run.
@@ -40,6 +40,7 @@ ezshare_ssid="$(field "$bridge" ezshare_ssid)"
 ezshare_password="$(field "$bridge" ezshare_password)"
 ota_password="$(field "$bridge" ota_password)"
 hostname="$(field "$bridge" hostname 2>/dev/null)" || hostname=""
+syslog_host="$(field "$bridge" syslog_host 2>/dev/null)" || syslog_host=""
 
 out="$(cd "$(dirname "$0")/.." && pwd)/include/secrets.h"
 tmp="$(mktemp "${out}.XXXXXX")"
@@ -55,6 +56,9 @@ trap 'rm -f "$tmp"' EXIT
   echo "#define OTA_PASSWORD $ota_password"
   if [[ -n "$hostname" ]]; then
     echo "#define BRIDGE_HOSTNAME $hostname"
+  fi
+  if [[ -n "$syslog_host" ]]; then
+    echo "#define SYSLOG_HOST $syslog_host"
   fi
 } >"$tmp"
 chmod 600 "$tmp"

@@ -19,13 +19,12 @@ inline LogField num(const char* key, int64_t value) { return {key, String(static
 // microSD. `level` is one of debug, info, warn, error, fatal.
 void logEvent(const char* level, const char* event, std::initializer_list<LogField> fields = {});
 
-// Opens the current log file positioned at the first line not yet acknowledged, and sets
-// `end` to the file's length. Returns false if there's no log file.
-bool openUnshipped(fs::File& file, uint32_t& end);
-
-// Records that every line before `offset` has been shipped. Returns false if `offset` is
-// before the last acknowledged offset or past the end of the file.
-bool ackShipped(uint32_t offset);
+// Sends log lines written since the last call to SYSLOG_HOST as RFC 5424 syslog over UDP,
+// up to 50 per call, and records how far it got. Does nothing when SYSLOG_HOST is empty or
+// the bridge is off the home network; the lines wait in the file until the next call.
+// UDP has no acknowledgement, so a datagram lost on the network is gone from the receiver
+// but stays in the file.
+void shipLogs();
 
 // Opens the current log file for reading whole.
 fs::File openLog();
