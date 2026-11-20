@@ -161,6 +161,15 @@ static void test_plan_known_night_without_session_files() {
     TEST_ASSERT_FALSE(planKnownNight({"notes.txt", "STR.edf"}).has_value());
 }
 
+static void test_settings_stems() {
+    const auto stems = settingsStems({"AGL.tgt", "AGL.crc", "ABR.log", "XYZ.tgt", "notes.txt", "AB.tgt", "abc.tgt"});
+    TEST_ASSERT_EQUAL_size_t(3, stems.size());
+    TEST_ASSERT_EQUAL_STRING("ABR", stems[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("AGL", stems[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("XYZ", stems[2].c_str());
+    TEST_ASSERT_EQUAL_size_t(0, settingsStems({}).size());
+}
+
 static void test_expand_settings_stems() {
     FakeFolder card{{"AGL.tgt", "AGL.crc", "ABR.log", "XYZ.tgt"}};
     std::vector<std::string> found;
@@ -381,6 +390,7 @@ int main() {
     RUN_TEST(test_plan_known_night_rechecks_the_newest_sessions_brp);
     RUN_TEST(test_plan_known_night_only_eve_and_csl);
     RUN_TEST(test_plan_known_night_without_session_files);
+    RUN_TEST(test_settings_stems);
     RUN_TEST(test_time_alphabets_split_at_noon);
     RUN_TEST(test_add_days_crosses_month_year_and_leap_day);
     RUN_TEST(test_days_between);

@@ -289,22 +289,6 @@ void syncRoot(Run& run) {
     syncFile(root, "STR.edf", run);
 }
 
-void syncSettings(Run& run) {
-    const Folder settings{"..%5CSETTINGS", "/SETTINGS"};
-    std::vector<std::string> stems;
-    const auto exists = [&](const std::string& p) { return probeExists(settings, p, run); };
-    if (!ezshare::expand("", std::vector<std::string_view>(3, ezshare::kLetters), exists, stems)) return;
-    SDFS.mkdir(settings.local);
-    for (const auto& stem : stems) {
-        if (run.stopForTime()) return;
-        syncFile(settings, stem + ".tgt", run);
-        syncFile(settings, stem + ".log", run);
-    }
-}
-
-// Copies one night's folder. A folder the bridge doesn't have yet is copied into a hidden
-// .<date> folder and renamed when the run finishes it with no failures, so an unfinished
-// copy is never mistaken for a finished one, and the puller sees a night all at once.
 // The names of the files in a folder on the microSD.
 std::vector<std::string> localNames(const String& path) {
     std::vector<std::string> names;
@@ -315,6 +299,51 @@ std::vector<std::string> localNames(const String& path) {
     return names;
 }
 
+ezshare::Date localToday() {
+    const time_t now = time(nullptr);
+    tm local{};
+    localtime_r(&now, &local);
+    return {local.tm_year + 1900, local.tm_mon + 1, local.tm_mday};
+}
+
+constexpr const char* kSettingsListedPath = "/.bridge/settings-listed";
+
+// SETTINGS holds about 40 files with three-letter names that rarely change, and finding the
+// names takes about 1,000 probes. So the names are searched for once a day, or when the bridge
+// has none; other runs re-check only the files it already has.
+void syncSettings(Run& run) {
+    const Folder settings{"..%5CSETTINGS", "/SETTINGS"};
+    const std::string today = ezshare::folderName(localToday());
+    std::vector<std::string> stems = ezshare::settingsStems(localNames(settings.local));
+    String listedOn;
+    if (fs::File f = SDFS.open(kSettingsListedPath, "r")) {
+        listedOn = f.readStringUntil('\n');
+        f.close();
+    }
+    const bool search = stems.empty() || listedOn != today.c_str();
+    if (search) {
+        stems.clear();
+        const auto exists = [&](const std::string& p) { return probeExists(settings, p, run); };
+        if (!ezshare::expand("", std::vector<std::string_view>(3, ezshare::kLetters), exists, stems)) return;
+    }
+    SDFS.mkdir(settings.local);
+    const uint32_t failuresBefore = run.failures;
+    for (const auto& stem : stems) {
+        if (run.stopForTime()) return;
+        syncFile(settings, stem + ".tgt", run);
+        syncFile(settings, stem + ".log", run);
+    }
+    if (search && run.failures == failuresBefore) {
+        if (fs::File f = SDFS.open(kSettingsListedPath, "w")) {
+            f.print(today.c_str());
+            f.close();
+        }
+    }
+}
+
+// Copies one night's folder. A folder the bridge doesn't have yet is copied into a hidden
+// .<date> folder and renamed when the run finishes it with no failures, so an unfinished
+// copy is never mistaken for a finished one, and the puller sees a night all at once.
 void syncNight(ezshare::Date night, Run& run) {
     const std::string name = ezshare::folderName(night);
     const String finalPath = String("/DATALOG/") + name.c_str();
@@ -395,10 +424,7 @@ std::optional<ezshare::Date> backfilledThrough() {
 // Night folders newest first: the lookback window every run, then any older night the
 // bridge hasn't finished or checked, back to the card's start date.
 void syncDatalog(Run& run) {
-    time_t now = time(nullptr);
-    tm local{};
-    localtime_r(&now, &local);
-    const ezshare::Date today{local.tm_year + 1900, local.tm_mon + 1, local.tm_mday};
+    const ezshare::Date today = localToday();
     const ezshare::Date lookbackStart = ezshare::addDays(today, -LOOKBACK_DAYS);
     const ezshare::Date oldest = ezshare::backfillFloor(lookbackStart, cardStartDate(), backfilledThrough());
     const uint32_t failuresBefore = run.failures;

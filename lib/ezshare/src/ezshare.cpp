@@ -102,6 +102,18 @@ bool expand(const std::string& prefix, const std::vector<std::string_view>& alph
     return expandFrom(p, alphabets, 0, probe, found, after);
 }
 
+std::vector<std::string> settingsStems(const std::vector<std::string>& names) {
+    std::set<std::string> stems;
+    for (const auto& name : names) {
+        if (name.size() != 7 || name[3] != '.') continue;
+        const std::string_view stem = std::string_view(name).substr(0, 3);
+        if (std::all_of(stem.begin(), stem.end(), [](char c) { return c >= 'A' && c <= 'Z'; })) {
+            stems.emplace(stem);
+        }
+    }
+    return {stems.begin(), stems.end()};
+}
+
 std::optional<KnownNight> planKnownNight(const std::vector<std::string>& names) {
     std::set<std::string> stamps, recheck;
     std::string newestBrp;

@@ -274,6 +274,10 @@ flowchart TD
     Recent --> Backfill["DATALOG/: older nights not yet copied or checked, back to STR.edf's start date"]
 ```
 
+`SETTINGS/` holds about 40 files whose names rarely change, and finding the names takes about
+1,000 probes. The first run each day searches for them and records the date in
+`/.bridge/settings-listed`; the day's other runs re-check only the files the bridge already has.
+
 Backfill runs once per card history: when a run visits every older night without a failure, the
 bridge records the newest of them in `/.bridge/backfilled` and later runs start the day after it.
 Otherwise a card that holds only recent nights, while its `STR.edf` goes back a year, would get a
