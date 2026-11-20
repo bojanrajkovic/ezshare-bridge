@@ -138,14 +138,19 @@ void shipLogs() {
     // A batch per call keeps the web server responsive while a long backlog drains.
     for (int sent = 0; sent < 50 && f.available(); ++sent) {
         const String line = f.readStringUntil('\n');  // logEvent writes whole lines, so each ends in \n
-        offset = f.position();
-        if (line.isEmpty()) continue;
+        if (line.isEmpty()) {
+            offset = f.position();
+            continue;
+        }
         const String ts = field(line, "ts");
         udp.beginPacket(target, SYSLOG_PORT);
         udp.printf("<%d>1 %s %s ezshare-bridge - - - ", priority(field(line, "level")), ts.isEmpty() ? "-" : ts.c_str(),
                    BRIDGE_HOSTNAME);
         udp.print(line);
-        udp.endPacket();
+        // The stack refuses packets when its buffers are full; resend this line on the next call.
+        if (!udp.endPacket()) break;
+        offset = f.position();
+        delay(10);  // back-to-back packets overflow the Wi-Fi transmit queue and are dropped silently
     }
     f.close();
     writeShipped(offset);
