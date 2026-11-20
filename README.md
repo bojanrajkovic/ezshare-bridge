@@ -165,6 +165,7 @@ its microSD: boot, each sync run's outcome, and every failure with its details.
 | Event | Fields |
 |---|---|
 | `boot` | `version`, `reset_reason`, `ip`, `sd_ok` |
+| `copied` | `path`, `bytes`, `ms` (from the first request to the rename) |
 | `sync` | `result`, `files`, `bytes`, `pending`, `probes`, `folders` (night folders found on the card), `seconds`, `ezshare_rssi` |
 | `join_failed` | `ssid`, `wifi_status` |
 | `probe_failed` | `pattern`, `folder`, `status` (the HTTP status, or a negative client error) |
@@ -210,7 +211,7 @@ Everything besides credentials has a default in `include/config.h`. Override any
 | `NTP_SERVER` | `pool.ntp.org` | |
 | `SYNC_INTERVAL_MINUTES` | `60` | |
 | `SYNC_WINDOW_START_HOUR`, `SYNC_WINDOW_END_HOUR` | `9`, `18` | Local hours when syncs may run. Keeps the bridge off the card overnight. |
-| `LOOKBACK_DAYS` | `7` | `DATALOG` folders this recent are checked every run |
+| `LOOKBACK_DAYS` | `2` | `DATALOG` folders this recent are checked every run; each costs about 2,000 probes |
 | `SYNC_TIME_BUDGET_SECONDS` | `5400` | A run goes home after this long, even with files left, so a hung run can't keep the bridge unreachable |
 | `JOIN_TIMEOUT_SECONDS` | `30` | |
 

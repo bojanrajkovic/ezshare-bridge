@@ -216,6 +216,7 @@ CopyResult copyBody(HTTPClient& http, fs::File& out) {
 // comes up short, and renames it over the copy once it has all `total` bytes.
 bool download(const Folder& folder, const std::string& name, uint64_t total, Run& run) {
     if (run.stopForTime()) return false;
+    const uint32_t startMs = millis();
     const String path = folder.local + "/" + name.c_str();
     const String partPath = path + ".part";
 
@@ -266,6 +267,8 @@ bool download(const Folder& folder, const std::string& name, uint64_t total, Run
             }
             metrics.filesDownloaded++;
             metrics.bytesDownloaded += total;
+            logEvent("info", "copied", {text("path", path), num("bytes", static_cast<int64_t>(total)),
+                                        num("ms", millis() - startMs)});
             return true;
         }
         logEvent("warn", "download_stalled",
