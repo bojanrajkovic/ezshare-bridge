@@ -195,6 +195,22 @@ std::optional<ByteRange> requestedRange(std::string_view header, uint32_t size) 
     return ByteRange{first, last};
 }
 
+std::string davResponse(std::string_view href, bool collection, uint64_t size, std::string_view lastModified) {
+    std::string out = "<D:response><D:href>";
+    out += href;
+    out += "</D:href><D:propstat><D:prop>";
+    if (collection) {
+        out += "<D:resourcetype><D:collection/></D:resourcetype>";
+    } else {
+        out += "<D:resourcetype/><D:getcontentlength>" + std::to_string(size) + "</D:getcontentlength>";
+        out += "<D:getlastmodified>";
+        out += lastModified;
+        out += "</D:getlastmodified>";
+    }
+    out += "</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>\n";
+    return out;
+}
+
 bool sendsRange(std::string_view name) { return !endsWith(name, ".crc"); }
 
 bool keepsSignatureBytes(std::string_view name) { return endsWith(name, ".edf") || endsWith(name, ".crc"); }

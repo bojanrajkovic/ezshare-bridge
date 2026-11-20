@@ -108,6 +108,10 @@ ByteRange signatureRange(std::string_view name);
 // file, which a client must accept.
 std::optional<ByteRange> requestedRange(std::string_view header, uint32_t size);
 
+// One <D:response> of a WebDAV PROPFIND reply, for a folder (`collection`) or a file with its
+// size and Last-Modified date. `href` is used as given: the bridge's names need no escaping.
+std::string davResponse(std::string_view href, bool collection, uint64_t size, std::string_view lastModified);
+
 // Whether a probe for `name` sends signatureRange(name) as a Range header. A .crc probe asks
 // for the whole file instead: its range runs past the end of a 4-byte .crc, and the card then
 // promises 8 bytes, sends 4, and keeps the download slot busy until it loses power.

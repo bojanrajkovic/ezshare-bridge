@@ -202,6 +202,20 @@ static void test_edf_start_date() {
     TEST_ASSERT_FALSE(parseEdfStartDate("21.02.2").has_value());
 }
 
+static void test_dav_response() {
+    TEST_ASSERT_EQUAL_STRING(
+        "<D:response><D:href>/files/DATALOG/</D:href><D:propstat><D:prop>"
+        "<D:resourcetype><D:collection/></D:resourcetype></D:prop>"
+        "<D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>\n",
+        davResponse("/files/DATALOG/", true, 0, "").c_str());
+    TEST_ASSERT_EQUAL_STRING(
+        "<D:response><D:href>/files/STR.edf</D:href><D:propstat><D:prop>"
+        "<D:resourcetype/><D:getcontentlength>107320</D:getcontentlength>"
+        "<D:getlastmodified>Fri, 20 Nov 2026 17:38:31 GMT</D:getlastmodified></D:prop>"
+        "<D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>\n",
+        davResponse("/files/STR.edf", false, 107320, "Fri, 20 Nov 2026 17:38:31 GMT").c_str());
+}
+
 static void test_requested_range() {
     const auto open = requestedRange("bytes=100-", 1000);
     TEST_ASSERT_TRUE(open.has_value());
@@ -373,6 +387,7 @@ int main() {
     RUN_TEST(test_edf_start_date);
     RUN_TEST(test_content_range_total);
     RUN_TEST(test_requested_range);
+    RUN_TEST(test_dav_response);
     RUN_TEST(test_signature_ranges);
     RUN_TEST(test_crc_companions);
     RUN_TEST(test_downloads_missing_or_changed_files);

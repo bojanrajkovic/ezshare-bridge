@@ -201,6 +201,69 @@ void handleLog() {
     f.close();
 }
 
+// Answers WebDAV PROPFIND, so rclone's webdav backend gets every file's size and date from one
+// request per folder instead of a HEAD per file. The server takes unknown methods for GET, so
+// this runs as a hook before routing. Read-only: every other DAV method falls through to the
+// normal handlers.
+ESP8266WebServer::ClientFuture handlePropfind(const String& method, const String& url, WiFiClient* client) {
+    if (method != "PROPFIND") return ESP8266WebServer::CLIENT_REQUEST_CAN_CONTINUE;
+
+    // The hook runs after the request line; the headers and body are still unread.
+    client->setTimeout(2000);
+    bool depthZero = false;
+    size_t bodyLength = 0;
+    for (;;) {
+        String line = client->readStringUntil('\n');
+        line.trim();
+        if (line.isEmpty()) break;
+        String lower = line;
+        lower.toLowerCase();
+        if (lower.startsWith("depth:")) depthZero = lower.endsWith("0");
+        if (lower.startsWith("content-length:")) bodyLength = lower.substring(15).toInt();
+    }
+    for (size_t i = 0; i < bodyLength && client->connected(); ++i) {
+        if (client->read() < 0) delay(1);  // the body (which properties to return) is ignored
+    }
+
+    String path = ESP8266WebServer::urlDecode(url);
+    if (path.startsWith(kFilesPrefix)) path = path.substring(strlen(kFilesPrefix));
+    if (path.isEmpty()) path = "/";
+    const bool wantsDir = path.endsWith("/");
+    if (wantsDir && path.length() > 1) path.remove(path.length() - 1);
+    fs::File f;
+    if (!url.startsWith(kFilesPrefix) || path.indexOf("..") >= 0 || !isServable(path) || !metrics.sdOk ||
+        !(path == "/" || (f = SDFS.open(path, "r")))) {
+        client->print("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return ESP8266WebServer::CLIENT_MUST_STOP;
+    }
+    const bool isDir = path == "/" || f.isDirectory();
+    const String base = String(kFilesPrefix) + (path == "/" ? "" : path);
+
+    client->setTimeout(kWriteTimeoutMs);
+    client->print("HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml; charset=utf-8\r\n"
+                  "Connection: close\r\n\r\n<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                  "<D:multistatus xmlns:D=\"DAV:\">\n");
+    if (!isDir) {
+        client->print(ezshare::davResponse(base.c_str(), false, f.size(), httpDate(f.getLastWrite()).c_str()).c_str());
+    } else {
+        client->print(ezshare::davResponse((base + "/").c_str(), true, 0, "").c_str());
+        if (!depthZero) {
+            fs::Dir dir = SDFS.openDir(path);
+            while (dir.next()) {
+                const String name = dir.fileName();
+                if (name.startsWith(".") || name.endsWith(".part")) continue;
+                const String href = base + "/" + name + (dir.isDirectory() ? "/" : "");
+                client->print(ezshare::davResponse(href.c_str(), dir.isDirectory(), dir.fileSize(),
+                                                   httpDate(dir.fileTime()).c_str())
+                                  .c_str());
+            }
+        }
+    }
+    client->print("</D:multistatus>\n");
+    if (f) f.close();
+    return ESP8266WebServer::CLIENT_MUST_STOP;
+}
+
 bool restartRequested = false;
 
 // Restarting starts a sync right away. The OTA password guards it, so another device on the
@@ -217,6 +280,8 @@ void handleRestart() {
 
 void startWeb() {
     server.collectHeaders("Range");
+    server.addHook([](const String& method, const String& url, WiFiClient* client,
+                      ESP8266WebServer::ContentTypeFunction) { return handlePropfind(method, url, client); });
     server.on("/metrics", HTTP_GET, handleMetrics);
     server.on("/log", HTTP_GET, handleLog);
     server.on("/restart", HTTP_POST, handleRestart);

@@ -92,18 +92,24 @@ mise run ota <ip-or-hostname.local>
 
 ## Pulling the files
 
-The `/files/` index is plain HTML links, which rclone's `http` backend reads:
+`/files/` also answers WebDAV `PROPFIND`, read-only, so rclone's `webdav` backend gets every
+file's size and date from one request per folder:
 
 ```bash
-rclone copy :http: /path/to/cpap-data \
-  --http-url http://<bridge>/files/ \
-  --transfers 1 --checkers 1
+rclone copy :webdav: /path/to/cpap-data \
+  --webdav-url http://<bridge>/files/ \
+  --transfers 1 --checkers 1 --check-first
 ```
 
-The bridge serves one request at a time, hence `--transfers 1 --checkers 1`. It answers a
-`Range: bytes=<first>-` or `bytes=<first>-<last>` request with `206`, so a puller resumes a
-cut-off download instead of starting over. Each file has
-an exact `Content-Length` and a `Last-Modified` time of when the bridge downloaded it, so
+The bridge serves one request at a time, hence `--transfers 1 --checkers 1`. `--check-first`
+makes rclone list everything before it copies anything, so its progress shows the real total.
+The bridge answers a `Range: bytes=<first>-` or `bytes=<first>-<last>` request with `206`, so
+rclone resumes a cut-off download instead of starting over.
+
+In a browser, `/files/` is a plain HTML index. rclone's `http` backend can read it too, but it
+sends a `HEAD` request per file to learn sizes and dates, which gets slow as the nights pile up.
+
+Each file has an exact size and a `Last-Modified` time of when the bridge downloaded it, so
 rclone only copies what changed. Don't add `--delete`: if the bridge's microSD is ever replaced, a
 mirror with `--delete` would remove your history.
 
