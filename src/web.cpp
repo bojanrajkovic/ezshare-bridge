@@ -132,6 +132,10 @@ void handleMetrics() {
     out += "ezshare_bridge_bytes_downloaded_total " + String(static_cast<unsigned long long>(metrics.bytesDownloaded)) + "\n";
     metric(out, "ezshare_bridge_pending_files", "gauge", "Files the last sync left to copy.");
     out += "ezshare_bridge_pending_files " + String(metrics.pendingFiles) + "\n";
+    metric(out, "ezshare_bridge_probes_total", "counter", "Requests that asked the card whether a file exists.");
+    out += "ezshare_bridge_probes_total " + String(metrics.probes) + "\n";
+    metric(out, "ezshare_bridge_sync_duration_seconds", "gauge", "How long the last sync took.");
+    out += "ezshare_bridge_sync_duration_seconds " + String(metrics.lastSyncSeconds) + "\n";
 
     metric(out, "ezshare_bridge_sd_ok", "gauge", "Whether the bridge's microSD mounted.");
     out += "ezshare_bridge_sd_ok " + String(metrics.sdOk ? 1 : 0) + "\n";
