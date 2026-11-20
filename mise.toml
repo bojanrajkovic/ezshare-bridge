@@ -10,7 +10,7 @@ uv = "0.13.8"
 _.file = { path = "mise.local.toml", redact = true, tools = false }
 
 [tasks.test]
-description = "Run the listing parser and download decision tests on this machine"
+description = "Run the discovery and download decision tests on this machine"
 run = "uvx --from platformio==6.2.0 pio test -e native"
 
 [tasks.build]

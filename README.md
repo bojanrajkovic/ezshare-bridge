@@ -18,8 +18,8 @@ flowchart LR
 Every hour inside a daytime window, the bridge:
 
 1. leaves your network and joins the card's;
-2. lists the card's root, `SETTINGS/` and recent `DATALOG/` folders, and downloads every file
-   that's new or changed to its own microSD;
+2. finds the files in the card's root, `SETTINGS/` and `DATALOG/` folders, and downloads every
+   file that's new or changed to its own microSD;
 3. rejoins your network.
 
 Between runs it serves the copied files at `http://<bridge>/files/` for a puller such as
@@ -33,7 +33,12 @@ can't lose data because of it.
   power it from USB.
 - **A microSD card**, FAT32. The bridge keeps a full copy of what it downloads. A night of
   ResMed data is a few MB, so any size works.
-- **An ez Share Wi-Fi SD card** in the CPAP.
+- **An ez Share Wi-Fi SD card** in the CPAP. The bridge is tested against card firmware
+  LZ1001EDPG 4.4.0.
+
+The card may need a `DCIM/100CANON/` folder holding one `.JPG` before its web server answers
+downloads. This isn't confirmed yet; if every run ends in `probe_failed`, add them from a
+computer.
 
 The ESP8266 has one radio, so it can be on only one network at a time. While a sync runs
 (seconds to a few minutes), the bridge is unreachable from your network.
@@ -96,8 +101,8 @@ rclone copy :http: /path/to/cpap-data \
 ```
 
 The bridge serves one request at a time, hence `--transfers 1 --checkers 1`. Each file has
-an exact `Content-Length` and a `Last-Modified` time taken from the card, so rclone only
-copies what changed. Don't add `--delete`: if the bridge's microSD is ever replaced, a
+an exact `Content-Length` and a `Last-Modified` time of when the bridge downloaded it, so
+rclone only copies what changed. Don't add `--delete`: if the bridge's microSD is ever replaced, a
 mirror with `--delete` would remove your history.
 
 The layout matches the SD card's: `STR.edf`, `Identification.*`, `SETTINGS/`, `DATALOG/<date>/`.
@@ -109,12 +114,25 @@ The layout matches the SD card's: `STR.edf`, `Identification.*`, `SETTINGS/`, `D
 | Metric | Meaning |
 |---|---|
 | `ezshare_bridge_sync_last_success_timestamp_seconds` | Unix time of the last run that finished with nothing left to copy |
-| `ezshare_bridge_sync_runs_total{result}` | Runs by outcome: `ok`, `join_failed`, `listing_failed`, `download_failed`, `sd_error`, `time_budget` |
+| `ezshare_bridge_sync_runs_total{result}` | Runs by outcome (below) |
+| `ezshare_bridge_sync_duration_seconds` | How long the last run took |
 | `ezshare_bridge_files_downloaded_total`, `ezshare_bridge_bytes_downloaded_total` | Copied from the card |
-| `ezshare_bridge_pending_files` | Files the last run left for the next one |
+| `ezshare_bridge_probes_total` | Requests that asked the card whether a file exists |
+| `ezshare_bridge_pending_files` | Work the last run left for the next one: files, or a folder it didn't reach |
 | `ezshare_bridge_sd_ok`, `ezshare_bridge_sd_free_bytes` | The bridge's microSD |
 | `ezshare_bridge_wifi_rssi_dbm{network}` | Signal on your network (`home`) and the card's (`ezshare`, as of the last run) |
 | `ezshare_bridge_uptime_seconds`, `ezshare_bridge_free_heap_bytes`, `ezshare_bridge_build_info{version}` | Device health |
+
+A run reports the first failure it hit:
+
+| Outcome | Meaning |
+|---|---|
+| `ok` | Everything on the card is copied |
+| `join_failed` | The bridge couldn't join the card's network |
+| `probe_failed` | A probe got neither 206 nor 404, or timed out |
+| `download_failed` | A download failed, or came up short after three resumes |
+| `sd_error` | The bridge's own microSD failed |
+| `time_budget` | The run hit `SYNC_TIME_BUDGET_SECONDS` with work left |
 
 Counters reset when the bridge reboots. A useful alert: the last success is more than a day
 old. That covers a bridge that's down, a card it can't reach, and a backlog that never clears.
@@ -122,12 +140,21 @@ old. That covers a bridge that's down, a card it can't reach, and a backlog that
 ## Logs
 
 The bridge writes one JSON line per event to the serial console and to `/.bridge/log.txt` on
-its microSD: boot, each sync run's outcome, and every failure with its details (the listing
-line it rejected, the download that came up short, the network it couldn't join).
+its microSD: boot, each sync run's outcome, and every failure with its details.
 
 ```json
-{"ts":"2026-11-20T14:00:41Z","up":3612,"level":"error","logger":"ezshare-bridge","event":"download_incomplete","path":"/DATALOG/20261119/20261119_221502_BRP.edf","bytes":512000,"content_length":4190420,"listed_kb":4093}
+{"ts":"2026-11-20T14:00:41Z","up":3612,"level":"warn","logger":"ezshare-bridge","event":"download_stalled","path":"/DATALOG/20261119/20261119_221502_BRP.edf","bytes":512000,"total":4190420}
 ```
+
+| Event | Fields |
+|---|---|
+| `boot` | `version`, `reset_reason`, `ip`, `sd_ok` |
+| `sync` | `result`, `files`, `bytes`, `pending`, `probes`, `folders` (night folders found on the card), `seconds`, `ezshare_rssi` |
+| `join_failed` | `ssid`, `wifi_status` |
+| `probe_failed` | `pattern`, `folder`, `status` (the HTTP status, or a negative client error) |
+| `download_stalled` | `path`, `bytes` (in `<name>.part` so far), `total`; the bridge resumes from there |
+| `download_failed` | `path`, `status` |
+| `sd_error` | `op`, `path` |
 
 `ts` is empty until NTP answers; `up` (seconds since boot) orders lines regardless. `level` is
 one of `debug`, `info`, `warn`, `error`, `fatal`.
@@ -167,32 +194,78 @@ Everything besides credentials has a default in `include/config.h`. Override any
 | `SYNC_TIME_BUDGET_SECONDS` | `600` | A run goes home after this long, even with files left |
 | `JOIN_TIMEOUT_SECONDS` | `30` | |
 
-## How it decides what to copy
+## The card's web API
 
-The card lists sizes rounded to KB and gives every file's modification time. When the bridge
-saves a file, it sets the copy's modification time to the card's. A file is current when the
-copy exists, its time matches, and its size is within the card's KB rounding.
+The card serves files at `http://192.168.4.1/download`, and nothing else the bridge can use.
+Its `/dir` page redirects to a welcome page, and its XML API lists only photos under `DCIM/`.
+So the bridge can't list a folder; it has to ask whether a file exists.
 
-`DATALOG` folders inside `LOOKBACK_DAYS` are listed every run, since the CPAP may still be
-writing to them. Older folders are listed only if the bridge has never copied them. That way
-the first run copies everything on the card, and later runs stay short as the card fills up.
+```
+GET /download?fname=<long file name>&fdir=..%5C<folder>
+Range: bytes=<first>-<last>
+```
 
-A download goes to `<name>.part` first and is renamed only after its length checks out, so a
-puller never sees a partial file.
+- `fdir` is the folder with backslashes (`%5C`), starting at `..`. The root is exactly `..`;
+  `..%5C` returns 404. A night folder is `..%5CDATALOG%5C20261119`.
+- `fname` takes the long name with its real extension (`20261119_221502_BRP.edf`). 8.3 short
+  names don't work. Matching ignores case.
+- `fname` accepts `*` and `?` wildcards, and the card answers with the first matching file. Send
+  `?` as is: the card hangs on `%3F` until the request times out.
+- A match answers `206` with `Content-Range: bytes <first>-<last>/<size>`. No match answers
+  `404` within a few milliseconds. Neither names the file that matched.
+- `Last-Modified` is always in 1990, so the bridge ignores it.
 
-If the card returns a listing line the parser doesn't recognise, the run fails with
-`listing_failed` rather than skipping the entry, so a format change can't silently drop data.
+## How it finds and copies files
+
+A **probe** is one ranged request. `206` means a file matches, `404` means none does, and
+anything else (or a timeout) fails the run with `probe_failed`, so a card that misbehaves
+can't make files look absent.
+
+Each run works through the card in this order, and stops when `SYNC_TIME_BUDGET_SECONDS` runs out:
+
+```mermaid
+flowchart TD
+    Root["Root: Identification.tgt/.crc, STR.edf/.crc"] --> Settings["SETTINGS/: three-letter stems A–Z, then .tgt, .crc, .log"]
+    Settings --> Recent["DATALOG/: today back through LOOKBACK_DAYS"]
+    Recent --> Backfill["DATALOG/: older nights not yet copied, back to STR.edf's start date"]
+```
+
+Names follow ResMed's conventions, and the bridge saves them in that case:
+
+- **Night folders.** The bridge probes `fname=*` in `DATALOG\<date>` for each date. A folder
+  holds sessions that start after noon on its date and before noon the next day.
+- **Session timestamps.** File names are `<date>_<HHMMSS>_<type>.edf` and `.crc`, with the
+  folder's date or the next day's. The bridge extends `<date>_` one digit at a time
+  (`20261119_2*`, `20261119_22*`, ...) and drops every prefix that gets a 404.
+- **Files.** For each timestamp, it probes `BRP`, `PLD`, `SAD`, `EVE` and `CSL`, each `.edf`
+  and `.crc`. The three files of one session can be a second apart, so each timestamp is found
+  on its own.
+
+Each exact-name probe also fetches the file's **signature**: its size plus, for an `.edf`, the
+record count at bytes 236–243 (the CPAP can rewrite it on close without changing the size),
+and for a `.crc`, its content. The bridge computes the same signature from its own copy. A
+file is copied when the copy is missing, the signatures differ, or its `.crc` changed.
+
+A download goes to `<name>.part` and is renamed when its length matches the probe's size, so a
+puller never sees a partial file. A transfer that stalls or comes up short resumes with a
+`Range` request, up to three times. The next run starts over.
+
+`DATALOG` folders inside `LOOKBACK_DAYS` are checked every run, since the CPAP may still be
+writing to them. A night the bridge doesn't have yet is copied into a hidden `.<date>` folder
+and renamed when a run finishes it without failures. Older nights the bridge has are skipped,
+so later runs stay short as the card fills up.
 
 ## Development
 
 ```bash
-mise run test    # parser and decision tests, on your machine
+mise run test    # discovery and download decision tests, on your machine
 mise run build
 ```
 
-`lib/ezshare/` holds the listing parser and download decisions. It has no Arduino code, so the
-tests run natively. `src/` is the firmware: `sync.cpp` (network switching, listing, downloads),
-`web.cpp` (`/files/` and `/metrics`) and `main.cpp` (setup and scheduling).
+`lib/ezshare/` holds the wildcard search, date arithmetic, EDF and `Content-Range` parsing,
+and download decisions. It has no Arduino code, so the tests run natively against a fake
+card. `src/` is the firmware: `sync.cpp` (network switching, probes, downloads), `web.cpp`
+(`/files/` and `/metrics`) and `main.cpp` (setup and scheduling).
 
 ## License
 
