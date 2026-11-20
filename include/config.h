@@ -48,9 +48,11 @@
 #define LOOKBACK_DAYS 7
 #endif
 
-// After this long on the card's network, the bridge goes home even with work left.
+// After this long on the card's network, the bridge goes home even with work left. It's long
+// enough for a night's copy (10-20 MB at about 5 KB/s); it exists so a hung run can't keep the
+// bridge off the home network, where nothing can reach it.
 #ifndef SYNC_TIME_BUDGET_SECONDS
-#define SYNC_TIME_BUDGET_SECONDS 600
+#define SYNC_TIME_BUDGET_SECONDS 5400
 #endif
 
 #ifndef JOIN_TIMEOUT_SECONDS
