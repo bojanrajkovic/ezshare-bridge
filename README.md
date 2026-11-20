@@ -231,23 +231,24 @@ Range: bytes=<first>-<last>
   names don't work. Matching ignores case.
 - `fname` accepts `*` and `?` wildcards, and the card answers with the first matching file. Send
   `?` as is: the card hangs on `%3F` until the request times out.
-- A match answers `206` with `Content-Range: bytes <first>-<last>/<size>`, or a plain `200` with
-  the whole file when the range covers all of it (a 4–8 byte `.crc`). No match answers `404`
+- A match answers `206` with `Content-Range: bytes <first>-<last>/<size>`. No match answers `404`
   within a few milliseconds. Neither names the file that matched.
+- A range that runs past the end of the file breaks the card. Asked for bytes 0-7 of a 4-byte
+  `.crc`, it answers `206` with `Content-Length: 8`, sends the 4 bytes that exist, and waits.
+  The client times out, and the card keeps that download slot busy until it loses power.
 - `Last-Modified` is always in 1990, so the bridge ignores it.
-- The card serves a limited number of downloads at once. When they're all in use, any request
-  that opens a file gets `503 Server Busy : Exceeds the Max Download Threads Limit!`, while
-  misses still get `404`. A download whose connection ends uncleanly, such as one the client
-  abandons over a weak link, appears to hold its slot until the card loses power. Other clients
-  are unaffected. The card closes the connection after every reply, even when the client asks
+- The card serves about five downloads at once. When they're all in use, any request that
+  opens a file gets `503 Server Busy : Exceeds the Max Download Threads Limit!`, while misses
+  still get `404`. Five abandoned downloads, such as the past-the-end ranges above, lock the
+  card's files away until the CPAP is power-cycled. The card closes the connection after every reply, even when the client asks
   for keep-alive. The bridge spaces requests at least 100 ms apart and backs off on a `503`.
 - `HTTPClient::writeToStream` stops after the first 512 bytes of every larger file when writing
   to the microSD, so the bridge copies response bodies a sector at a time itself.
 
 ## How it finds and copies files
 
-A **probe** is one ranged request. `206` (or `200` for a file the range covers whole) means a
-file matches, `404` means none does, and
+A **probe** is one ranged request, except for a `.crc`, which the bridge asks for whole
+(`200`). `206` or `200` means a file matches, `404` means none does, and
 anything else (or a timeout) fails the run with `probe_failed`, so a card that misbehaves
 can't make files look absent.
 

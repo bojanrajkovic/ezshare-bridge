@@ -142,6 +142,8 @@ ByteRange signatureRange(std::string_view name) {
     return {0, 0};
 }
 
+bool sendsRange(std::string_view name) { return !endsWith(name, ".crc"); }
+
 bool keepsSignatureBytes(std::string_view name) { return endsWith(name, ".edf") || endsWith(name, ".crc"); }
 
 std::string crcCompanion(std::string_view name) {

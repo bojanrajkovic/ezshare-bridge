@@ -84,6 +84,11 @@ struct ByteRange {
 // without changing the size, and a .crc's whole content. Other files need only the size.
 ByteRange signatureRange(std::string_view name);
 
+// Whether a probe for `name` sends signatureRange(name) as a Range header. A .crc probe asks
+// for the whole file instead: its range runs past the end of a 4-byte .crc, and the card then
+// promises 8 bytes, sends 4, and keeps the download slot busy until it loses power.
+bool sendsRange(std::string_view name);
+
 // Whether the bytes at signatureRange(name) are part of the signature (.edf and .crc).
 bool keepsSignatureBytes(std::string_view name);
 

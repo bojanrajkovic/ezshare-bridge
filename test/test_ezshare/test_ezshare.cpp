@@ -140,6 +140,11 @@ static void test_signature_ranges() {
     TEST_ASSERT_EQUAL_UINT32(7, signatureRange("AGL.crc").last);
     TEST_ASSERT_EQUAL_UINT32(0, signatureRange("AGL.tgt").last);
     TEST_ASSERT_EQUAL_UINT32(0, signatureRange("ABR.log").last);
+    TEST_ASSERT_FALSE(sendsRange("AGL.crc"));
+    TEST_ASSERT_FALSE(sendsRange("20260221_194046_BRP.crc"));
+    TEST_ASSERT_TRUE(sendsRange("STR.edf"));
+    TEST_ASSERT_TRUE(sendsRange("AGL.tgt"));
+    TEST_ASSERT_TRUE(sendsRange("*"));
     TEST_ASSERT_TRUE(keepsSignatureBytes("STR.edf"));
     TEST_ASSERT_TRUE(keepsSignatureBytes("STR.crc"));
     TEST_ASSERT_FALSE(keepsSignatureBytes("Identification.tgt"));

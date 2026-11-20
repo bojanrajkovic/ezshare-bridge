@@ -102,7 +102,9 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
         http.setTimeout(kProbeTimeoutMs);
         code = -1;
         if (http.begin(probeClient, downloadUrl(folder, pattern))) {
-            http.addHeader("Range", "bytes=" + String(range.first) + "-" + String(range.last));
+            if (ezshare::sendsRange(pattern)) {
+                http.addHeader("Range", "bytes=" + String(range.first) + "-" + String(range.last));
+            }
             http.collectHeaders(kHeaders, 1);
             const uint32_t sentMs = millis();
             code = http.GET();
