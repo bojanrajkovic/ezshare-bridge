@@ -120,7 +120,7 @@ The board's ESP-side LED (LD2, on GPIO2) shows what the bridge is doing:
 ## Restarting
 
 `mise run restart <host>` restarts the bridge, which starts a sync right away. It sends
-`POST /restart` with the user `bridge` and the OTA password from `include/secrets.h`. A
+`POST /restart` with Digest auth, the user `bridge` and the OTA password from `include/secrets.h`. A
 restart doesn't power-cycle the ez Share card; only the CPAP can do that.
 
 ## Metrics
@@ -211,7 +211,7 @@ Everything besides credentials has a default in `include/config.h`. Override any
 | `SYNC_INTERVAL_MINUTES` | `60` | |
 | `SYNC_WINDOW_START_HOUR`, `SYNC_WINDOW_END_HOUR` | `9`, `18` | Local hours when syncs may run. Keeps the bridge off the card overnight. |
 | `LOOKBACK_DAYS` | `7` | `DATALOG` folders this recent are checked every run |
-| `SYNC_TIME_BUDGET_SECONDS` | `600` | A run goes home after this long, even with files left |
+| `SYNC_TIME_BUDGET_SECONDS` | `5400` | A run goes home after this long, even with files left, so a hung run can't keep the bridge unreachable |
 | `JOIN_TIMEOUT_SECONDS` | `30` | |
 
 ## The card's web API
@@ -235,10 +235,12 @@ Range: bytes=<first>-<last>
   the whole file when the range covers all of it (a 4–8 byte `.crc`). No match answers `404`
   within a few milliseconds. Neither names the file that matched.
 - `Last-Modified` is always in 1990, so the bridge ignores it.
-- After about a thousand connections in a few minutes, the card answers `503` to any request
-  that opens a file, while misses still get `404`. It recovers within about 10 minutes. The
-  card supports keep-alive, so the bridge sends all its probes over one connection. It also
-  spaces requests at least 100 ms apart and backs off on a `503`.
+- The card serves a limited number of downloads at once. When they're all in use, any request
+  that opens a file gets `503 Server Busy : Exceeds the Max Download Threads Limit!`, while
+  misses still get `404`. A download whose connection ends uncleanly, such as one the client
+  abandons over a weak link, appears to hold its slot until the card loses power. Other clients
+  are unaffected. The card closes the connection after every reply, even when the client asks
+  for keep-alive. The bridge spaces requests at least 100 ms apart and backs off on a `503`.
 - `HTTPClient::writeToStream` stops after the first 512 bytes of every larger file when writing
   to the microSD, so the bridge copies response bodies a sector at a time itself.
 
