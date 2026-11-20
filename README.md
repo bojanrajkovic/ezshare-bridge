@@ -153,6 +153,7 @@ its microSD: boot, each sync run's outcome, and every failure with its details.
 | `join_failed` | `ssid`, `wifi_status` |
 | `probe_failed` | `pattern`, `folder`, `status` (the HTTP status, or a negative client error) |
 | `download_stalled` | `path`, `bytes` (in `<name>.part` so far), `total`, `cause` (`sd_short_write`, `timeout` or `closed`), and on a short write `chunk` and `written`; the bridge resumes from there |
+| `download_restarted` | `path`, `status`: a resume got something other than 206, so the file starts over |
 | `download_failed` | `path`, `status` |
 | `sd_error` | `op`, `path` |
 

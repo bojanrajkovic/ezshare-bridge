@@ -83,7 +83,8 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
     WiFiClient client;
     HTTPClient http;
     int code = -1;
-    // The card answers 503 once it has had too many connections in a short time; back off.
+    // Retry what's likely to pass on a second try: a 503 (the card is busy), or a connection
+    // that failed or timed out (a weak signal). Each retry waits twice as long.
     for (uint32_t backoffMs = 500; backoffMs <= 8000; backoffMs *= 2) {
         run.probes++;
         metrics.probes++;
@@ -96,7 +97,7 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
             http.collectHeaders(kHeaders, 1);
             code = http.GET();
         }
-        if (code != HTTP_CODE_SERVICE_UNAVAILABLE) break;
+        if (code != HTTP_CODE_SERVICE_UNAVAILABLE && code >= 0) break;
         http.end();
         delay(backoffMs);
     }
@@ -195,8 +196,10 @@ bool download(const Folder& folder, const std::string& name, uint64_t total, Run
     const String partPath = path + ".part";
 
     int code = -1;
+    bool fromStart = true;
     for (int attempt = 0; attempt < kDownloadAttempts; ++attempt) {
-        fs::File part = SDFS.open(partPath, attempt == 0 ? "w" : "a");
+        fs::File part = SDFS.open(partPath, fromStart ? "w" : "a");
+        fromStart = false;
         if (!part) {
             logEvent("error", "sd_error", {text("op", "write"), text("path", partPath)});
             run.pending++;
@@ -221,7 +224,13 @@ bool download(const Folder& folder, const std::string& name, uint64_t total, Run
         part.close();
         http.end();
 
-        if (code > 0 && code != expected) break;
+        if (code > 0 && code != expected) {
+            // A resume the card didn't answer with 206: start the file over rather than give up.
+            if (have == 0) break;
+            fromStart = true;
+            logEvent("warn", "download_restarted", {text("path", path), num("status", code)});
+            continue;
+        }
         if (got == total) {
             // FAT can't rename over an existing file. The puller keeps the previous copy meanwhile.
             SDFS.remove(path);
