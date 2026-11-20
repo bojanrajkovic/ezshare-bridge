@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <set>
 
 namespace ezshare {
 
@@ -102,22 +103,22 @@ bool expand(const std::string& prefix, const std::vector<std::string_view>& alph
 }
 
 std::optional<KnownNight> planKnownNight(const std::vector<std::string>& names) {
-    std::string newest;
-    std::vector<std::string> growing;
+    std::set<std::string> stamps, recheck;
+    std::string newestBrp;
     for (const auto& name : names) {
         if (!isSessionName(name)) continue;
         const std::string stamp = name.substr(0, 15);
-        if (stamp > newest) newest = stamp;
+        stamps.insert(stamp);
         const std::string_view type = std::string_view(name).substr(16, 3);
-        if ((type == "EVE" || type == "CSL") &&
-            std::find(growing.begin(), growing.end(), stamp) == growing.end()) {
-            growing.push_back(stamp);
-        }
+        if (type == "EVE" || type == "CSL") recheck.insert(stamp);
+        if (type == "BRP" && stamp > newestBrp) newestBrp = stamp;
     }
-    if (newest.empty()) return std::nullopt;
-    std::sort(growing.begin(), growing.end());
-    if (std::find(growing.begin(), growing.end(), newest) == growing.end()) growing.push_back(newest);
-    return KnownNight{newest, growing};
+    if (stamps.empty()) return std::nullopt;
+    // A session's files carry the times they were opened, a second or so apart, starting with
+    // its BRP. Everything from the newest BRP on belongs to the newest session.
+    const std::string& newest = *stamps.rbegin();
+    recheck.insert(stamps.lower_bound(newestBrp.empty() ? newest : newestBrp), stamps.end());
+    return KnownNight{newest, std::vector<std::string>(recheck.begin(), recheck.end())};
 }
 
 std::vector<std::string_view> timeAlphabets(bool nextDay) {

@@ -46,7 +46,7 @@ struct KnownNight {
 // Plans a run over a complete night folder from the names already copied. The CPAP names a
 // session's files by its start time, so a new file always sorts after every copied one: only
 // names after `after` need searching. Of the copied files, only the night's EVE and CSL (which
-// grow all night) and the newest session can still change. Returns nullopt when no name is a
+// grow all night) and the newest session's files, from its BRP on, can still change. Returns nullopt when no name is a
 // session file, so the caller searches the folder whole.
 std::optional<KnownNight> planKnownNight(const std::vector<std::string>& names);
 

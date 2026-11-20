@@ -131,9 +131,22 @@ static void test_plan_known_night() {
     TEST_ASSERT_TRUE(plan.has_value());
     // The newest name is on the next day: the night was split at noon.
     TEST_ASSERT_EQUAL_STRING("20260222_031503", plan->after.c_str());
-    TEST_ASSERT_EQUAL_size_t(2, plan->recheck.size());
+    TEST_ASSERT_EQUAL_size_t(3, plan->recheck.size());
     TEST_ASSERT_EQUAL_STRING("20260221_194046", plan->recheck[0].c_str());  // EVE and CSL grow all night
-    TEST_ASSERT_EQUAL_STRING("20260222_031503", plan->recheck[1].c_str());  // the newest session
+    // The newest session's files: its BRP starts a second before its PLD and SAD.
+    TEST_ASSERT_EQUAL_STRING("20260222_031502", plan->recheck[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("20260222_031503", plan->recheck[2].c_str());
+}
+
+static void test_plan_known_night_rechecks_the_newest_sessions_brp() {
+    const auto plan = planKnownNight({"20260311_180415_CSL.edf", "20260311_180415_EVE.edf", "20260311_180603_BRP.edf",
+                                      "20260311_180604_PLD.edf", "20260311_180604_SAD.edf"});
+    TEST_ASSERT_TRUE(plan.has_value());
+    TEST_ASSERT_EQUAL_STRING("20260311_180604", plan->after.c_str());
+    TEST_ASSERT_EQUAL_size_t(3, plan->recheck.size());
+    TEST_ASSERT_EQUAL_STRING("20260311_180415", plan->recheck[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("20260311_180603", plan->recheck[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("20260311_180604", plan->recheck[2].c_str());
 }
 
 static void test_plan_known_night_only_eve_and_csl() {
@@ -335,6 +348,7 @@ int main() {
     RUN_TEST(test_expand_after_a_later_prefix_skips_the_search);
     RUN_TEST(test_expand_after_an_earlier_prefix_searches_everything);
     RUN_TEST(test_plan_known_night);
+    RUN_TEST(test_plan_known_night_rechecks_the_newest_sessions_brp);
     RUN_TEST(test_plan_known_night_only_eve_and_csl);
     RUN_TEST(test_plan_known_night_without_session_files);
     RUN_TEST(test_time_alphabets_split_at_noon);
