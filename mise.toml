@@ -6,9 +6,6 @@
 "github:openscad/openscad" = { version = "2021.01", version_prefix = "openscad-", asset_pattern = "OpenSCAD-*-x86_64.AppImage", bin = "openscad", os = ["linux"] }
 uv = "0.13.8"
 
-[env]
-_.file = { path = "mise.local.toml", redact = true, tools = false }
-
 [tasks.test]
 description = "Run the discovery and download decision tests on this machine"
 run = "uvx --from platformio==6.2.0 pio test -e native"
