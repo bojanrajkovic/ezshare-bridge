@@ -114,7 +114,7 @@ The board's ESP-side LED (LD2, on GPIO2) shows what the bridge is doing:
 | Pattern | Meaning |
 |---|---|
 | A short blink every second | Syncing. The bridge is on the card's network and won't answer on yours. |
-| A double blink every 2 seconds | The last run failed. Check `/log` or `/metrics`. It clears when a run succeeds. |
+| A double blink every 2 seconds | The last run failed. It stops after 5 minutes; check the logs or `/metrics` for why. |
 | Off | Idle, and the last run succeeded or ran out of time and will carry on next run. |
 
 ## Metrics

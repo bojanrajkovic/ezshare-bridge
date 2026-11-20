@@ -5,7 +5,7 @@
 enum class LedPattern {
     Off,      // idle, last run fine
     Syncing,  // a short blink every second
-    Failed,   // a double blink every 2 seconds, until the next run
+    Failed,   // a double blink every 2 seconds, for 5 minutes after the run
 };
 
 void startLed();
