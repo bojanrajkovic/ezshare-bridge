@@ -102,6 +102,12 @@ struct ByteRange {
 // without changing the size, and a .crc's whole content. Other files need only the size.
 ByteRange signatureRange(std::string_view name);
 
+// The bytes a client's Range header asks for in a file of `size` bytes: "bytes=a-" or
+// "bytes=a-b", with b clamped to the file. nullopt for no header, one this doesn't parse
+// (suffix ranges, several ranges), or a start past the end; the caller then sends the whole
+// file, which a client must accept.
+std::optional<ByteRange> requestedRange(std::string_view header, uint32_t size);
+
 // Whether a probe for `name` sends signatureRange(name) as a Range header. A .crc probe asks
 // for the whole file instead: its range runs past the end of a 4-byte .crc, and the card then
 // promises 8 bytes, sends 4, and keeps the download slot busy until it loses power.

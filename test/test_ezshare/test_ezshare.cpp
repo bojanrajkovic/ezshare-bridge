@@ -202,6 +202,22 @@ static void test_edf_start_date() {
     TEST_ASSERT_FALSE(parseEdfStartDate("21.02.2").has_value());
 }
 
+static void test_requested_range() {
+    const auto open = requestedRange("bytes=100-", 1000);
+    TEST_ASSERT_TRUE(open.has_value());
+    TEST_ASSERT_EQUAL_UINT32(100, open->first);
+    TEST_ASSERT_EQUAL_UINT32(999, open->last);
+    const auto closed = requestedRange("bytes=0-7", 4);  // past the end: clamped to the file
+    TEST_ASSERT_TRUE(closed.has_value());
+    TEST_ASSERT_EQUAL_UINT32(3, closed->last);
+    TEST_ASSERT_FALSE(requestedRange("", 1000).has_value());
+    TEST_ASSERT_FALSE(requestedRange("bytes=1000-", 1000).has_value());  // starts past the end
+    TEST_ASSERT_FALSE(requestedRange("bytes=-500", 1000).has_value());   // suffix ranges aren't supported
+    TEST_ASSERT_FALSE(requestedRange("bytes=0-1,5-9", 1000).has_value());
+    TEST_ASSERT_FALSE(requestedRange("bytes=9-3", 1000).has_value());
+    TEST_ASSERT_FALSE(requestedRange("items=0-1", 1000).has_value());
+}
+
 static void test_content_range_total() {
     TEST_ASSERT_EQUAL_UINT64(4190420, contentRangeTotal("bytes 236-243/4190420").value());
     TEST_ASSERT_EQUAL_UINT64(4, contentRangeTotal("bytes 0-3/4").value());
@@ -356,6 +372,7 @@ int main() {
     RUN_TEST(test_days_between);
     RUN_TEST(test_edf_start_date);
     RUN_TEST(test_content_range_total);
+    RUN_TEST(test_requested_range);
     RUN_TEST(test_signature_ranges);
     RUN_TEST(test_crc_companions);
     RUN_TEST(test_downloads_missing_or_changed_files);

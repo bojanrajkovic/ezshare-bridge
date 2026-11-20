@@ -180,6 +180,21 @@ ByteRange signatureRange(std::string_view name) {
     return {0, 0};
 }
 
+std::optional<ByteRange> requestedRange(std::string_view header, uint32_t size) {
+    constexpr std::string_view kUnit = "bytes=";
+    if (header.substr(0, kUnit.size()) != kUnit) return std::nullopt;
+    header.remove_prefix(kUnit.size());
+    const size_t dash = header.find('-');
+    if (dash == std::string_view::npos) return std::nullopt;
+    const std::string_view a = header.substr(0, dash), b = header.substr(dash + 1);
+    if (!allDigits(a) || a.size() > 9 || (!b.empty() && (!allDigits(b) || b.size() > 9))) return std::nullopt;
+    const uint32_t first = static_cast<uint32_t>(toInt(a));
+    uint32_t last = b.empty() ? size - 1 : static_cast<uint32_t>(toInt(b));
+    if (first >= size || last < first) return std::nullopt;
+    if (last >= size) last = size - 1;
+    return ByteRange{first, last};
+}
+
 bool sendsRange(std::string_view name) { return !endsWith(name, ".crc"); }
 
 bool keepsSignatureBytes(std::string_view name) { return endsWith(name, ".edf") || endsWith(name, ".crc"); }

@@ -100,7 +100,9 @@ rclone copy :http: /path/to/cpap-data \
   --transfers 1 --checkers 1
 ```
 
-The bridge serves one request at a time, hence `--transfers 1 --checkers 1`. Each file has
+The bridge serves one request at a time, hence `--transfers 1 --checkers 1`. It answers a
+`Range: bytes=<first>-` or `bytes=<first>-<last>` request with `206`, so a puller resumes a
+cut-off download instead of starting over. Each file has
 an exact `Content-Length` and a `Last-Modified` time of when the bridge downloaded it, so
 rclone only copies what changed. Don't add `--delete`: if the bridge's microSD is ever replaced, a
 mirror with `--delete` would remove your history.

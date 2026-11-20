@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "config.h"
+#include "ezshare.h"
 #include "log.h"
 #include "state.h"
 
@@ -49,6 +50,16 @@ void sendIndex(const String& path) {
 // lossy link, and the puller can't resume them.
 constexpr uint32_t kWriteTimeoutMs = 30000;
 
+// Writes `len` bytes of `f`, from where it's positioned, to the client.
+void sendBytes(fs::File& f, uint32_t len) {
+    uint8_t buf[512];
+    while (len > 0) {
+        const size_t n = f.read(buf, std::min<uint32_t>(sizeof(buf), len));
+        if (n == 0 || server.client().write(buf, n) != n) return;
+        len -= n;
+    }
+}
+
 void sendFile(const String& path) {
     fs::File f = SDFS.open(path, "r");
     if (!f) {
@@ -56,7 +67,21 @@ void sendFile(const String& path) {
         return;
     }
     server.sendHeader("Last-Modified", httpDate(f.getLastWrite()));
-    if (server.method() == HTTP_HEAD) {
+    // A client resumes a cut-off download with a Range request. Without one, rclone appended a
+    // whole second copy of the file and threw both away.
+    server.sendHeader("Accept-Ranges", "bytes");
+    const String rangeHeader = server.header("Range");
+    const auto range = ezshare::requestedRange(std::string_view(rangeHeader.c_str(), rangeHeader.length()), f.size());
+    if (server.method() == HTTP_GET && range) {
+        const uint32_t len = range->last - range->first + 1;
+        f.seek(range->first);
+        server.sendHeader("Content-Range", "bytes " + String(range->first) + "-" + String(range->last) + "/" +
+                                               String(static_cast<uint32_t>(f.size())));
+        server.setContentLength(len);
+        server.client().setTimeout(kWriteTimeoutMs);
+        server.send(206, "application/octet-stream", "");
+        sendBytes(f, len);
+    } else if (server.method() == HTTP_HEAD) {
         server.setContentLength(f.size());
         server.send(200, "application/octet-stream", "");
     } else {
@@ -191,6 +216,7 @@ void handleRestart() {
 }  // namespace
 
 void startWeb() {
+    server.collectHeaders("Range");
     server.on("/metrics", HTTP_GET, handleMetrics);
     server.on("/log", HTTP_GET, handleLog);
     server.on("/restart", HTTP_POST, handleRestart);
