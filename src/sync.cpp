@@ -104,7 +104,18 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
         if (http.begin(probeClient, downloadUrl(folder, pattern))) {
             http.addHeader("Range", "bytes=" + String(range.first) + "-" + String(range.last));
             http.collectHeaders(kHeaders, 1);
+            const uint32_t sentMs = millis();
             code = http.GET();
+#ifdef EZB_DEBUG_PROBES
+            logEvent("debug", "probe", {text("folder", folder.local.isEmpty() ? String("/") : folder.local),
+                                        text("pattern", pattern.c_str()), num("status", code),
+                                        num("ms", millis() - sentMs), num("size", http.getSize()),
+                                        text("content_range", http.header("Content-Range")),
+                                        num("connected", probeClient.connected() ? 1 : 0),
+                                        text("body", code == HTTP_CODE_SERVICE_UNAVAILABLE ? http.getString() : String())});
+#else
+            (void)sentMs;
+#endif
         }
         if (code != HTTP_CODE_SERVICE_UNAVAILABLE && code >= 0) break;
         closeProbeConnection();
