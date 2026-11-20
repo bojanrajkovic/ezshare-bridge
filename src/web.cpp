@@ -23,6 +23,17 @@ bool isServable(const String& path) {
     return true;
 }
 
+// The microSD path a URL names: "/" for /files and /files/, "/a/b" for /files/a/b. Empty for any
+// other URL, and for one that reaches outside the card's files or into a hidden or .part entry.
+String servedPath(const String& url) {
+    const String decoded = ESP8266WebServer::urlDecode(url);
+    if (decoded == kFilesPrefix) return "/";
+    if (!decoded.startsWith(String(kFilesPrefix) + "/")) return "";
+    const String path = decoded.substring(strlen(kFilesPrefix));
+    if (path.indexOf("..") >= 0 || !isServable(path)) return "";
+    return path;
+}
+
 String httpDate(time_t t) {
     char buf[40];
     tm g{};
@@ -93,13 +104,8 @@ void sendFile(const String& path) {
 
 void handleFiles() {
     const String uri = server.uri();
-    if (!uri.startsWith(kFilesPrefix)) {
-        server.send(404, "text/plain", "not found\n");
-        return;
-    }
-    String path = ESP8266WebServer::urlDecode(uri.substring(strlen(kFilesPrefix)));
-    if (path.isEmpty()) path = "/";
-    if (path.indexOf("..") >= 0 || !isServable(path)) {
+    const String path = servedPath(uri);
+    if (path.isEmpty()) {
         server.send(404, "text/plain", "not found\n");
         return;
     }
@@ -208,31 +214,33 @@ void handleLog() {
 ESP8266WebServer::ClientFuture handlePropfind(const String& method, const String& url, WiFiClient* client) {
     if (method != "PROPFIND") return ESP8266WebServer::CLIENT_REQUEST_CAN_CONTINUE;
 
-    // The hook runs after the request line; the headers and body are still unread.
+    // The hook runs after the request line; the headers and body are still unread. A client that
+    // stops sending mustn't stall the bridge, so reading them has one deadline.
+    const uint32_t deadline = millis() + 2000;
     client->setTimeout(2000);
     bool depthZero = false;
-    size_t bodyLength = 0;
-    for (;;) {
+    long bodyLength = 0;
+    for (int lines = 0; lines < 32; ++lines) {
         String line = client->readStringUntil('\n');
         line.trim();
         if (line.isEmpty()) break;
-        String lower = line;
-        lower.toLowerCase();
-        if (lower.startsWith("depth:")) depthZero = lower.endsWith("0");
-        if (lower.startsWith("content-length:")) bodyLength = lower.substring(15).toInt();
+        line.toLowerCase();
+        if (line.startsWith("depth:")) depthZero = line.endsWith("0");
+        if (line.startsWith("content-length:")) bodyLength = line.substring(15).toInt();
     }
-    for (size_t i = 0; i < bodyLength && client->connected(); ++i) {
-        if (client->read() < 0) delay(1);  // the body (which properties to return) is ignored
+    // The body only names the properties wanted, and every reply carries the same few.
+    while (bodyLength > 0 && client->connected() && static_cast<int32_t>(deadline - millis()) > 0) {
+        if (client->read() >= 0) {
+            --bodyLength;
+        } else {
+            delay(1);
+        }
     }
 
-    String path = ESP8266WebServer::urlDecode(url);
-    if (path.startsWith(kFilesPrefix)) path = path.substring(strlen(kFilesPrefix));
-    if (path.isEmpty()) path = "/";
-    const bool wantsDir = path.endsWith("/");
-    if (wantsDir && path.length() > 1) path.remove(path.length() - 1);
+    String path = servedPath(url);
+    if (path.length() > 1 && path.endsWith("/")) path.remove(path.length() - 1);
     fs::File f;
-    if (!url.startsWith(kFilesPrefix) || path.indexOf("..") >= 0 || !isServable(path) || !metrics.sdOk ||
-        !(path == "/" || (f = SDFS.open(path, "r")))) {
+    if (path.isEmpty() || !metrics.sdOk || !(path == "/" || (f = SDFS.open(path, "r")))) {
         client->print("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         return ESP8266WebServer::CLIENT_MUST_STOP;
     }
