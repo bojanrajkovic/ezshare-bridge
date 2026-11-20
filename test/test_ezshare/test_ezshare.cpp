@@ -220,6 +220,38 @@ static void test_window() {
     TEST_ASSERT_TRUE(inWindow(3, 0, 0));
 }
 
+static void test_parse_folder_name() {
+    const auto d = parseFolderName("20261119");
+    TEST_ASSERT_TRUE(d.has_value());
+    TEST_ASSERT_EQUAL_INT(2026, d->year);
+    TEST_ASSERT_EQUAL_INT(11, d->month);
+    TEST_ASSERT_EQUAL_INT(19, d->day);
+    TEST_ASSERT_FALSE(parseFolderName("2026111").has_value());
+    TEST_ASSERT_FALSE(parseFolderName("20261340").has_value());
+    TEST_ASSERT_FALSE(parseFolderName("").has_value());
+}
+
+static void test_backfill_floor() {
+    const Date lookbackStart{2026, 11, 13};
+    // No card start date: only the lookback window.
+    TEST_ASSERT_EQUAL_STRING("20261113", folderName(backfillFloor(lookbackStart, std::nullopt, std::nullopt)).c_str());
+    // First pass: back to the card's first day.
+    TEST_ASSERT_EQUAL_STRING("20250911",
+                             folderName(backfillFloor(lookbackStart, Date{2025, 9, 11}, std::nullopt)).c_str());
+    // Everything through 2026-11-11 already checked: start the day after.
+    TEST_ASSERT_EQUAL_STRING(
+        "20261112", folderName(backfillFloor(lookbackStart, Date{2025, 9, 11}, Date{2026, 11, 11})).c_str());
+    // Checked past the window's start: never later than the window.
+    TEST_ASSERT_EQUAL_STRING(
+        "20261113", folderName(backfillFloor(lookbackStart, Date{2025, 9, 11}, Date{2026, 11, 18})).c_str());
+    // A card that starts after the checked date: the card's start wins.
+    TEST_ASSERT_EQUAL_STRING(
+        "20261101", folderName(backfillFloor(lookbackStart, Date{2026, 11, 1}, Date{2026, 10, 1})).c_str());
+    // A card that starts inside the window: the window's start.
+    TEST_ASSERT_EQUAL_STRING("20261113",
+                             folderName(backfillFloor(lookbackStart, Date{2026, 11, 15}, std::nullopt)).c_str());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_fake_card_matches_wildcards_ignoring_case);
@@ -244,5 +276,7 @@ int main() {
     RUN_TEST(test_safe_names);
     RUN_TEST(test_json_escape);
     RUN_TEST(test_window);
+    RUN_TEST(test_parse_folder_name);
+    RUN_TEST(test_backfill_floor);
     return UNITY_END();
 }

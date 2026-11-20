@@ -91,6 +91,19 @@ Date addDays(Date d, int days) { return civilFromDays(toDays(d) + days); }
 
 int daysBetween(Date from, Date to) { return static_cast<int>(toDays(to) - toDays(from)); }
 
+std::optional<Date> parseFolderName(std::string_view name) {
+    Date d{};
+    if (!parseFolderDate(name, d)) return std::nullopt;
+    return d;
+}
+
+Date backfillFloor(Date lookbackStart, std::optional<Date> cardStart, std::optional<Date> checkedThrough) {
+    if (!cardStart || daysBetween(*cardStart, lookbackStart) <= 0) return lookbackStart;
+    Date floor = *cardStart;
+    if (checkedThrough && daysBetween(floor, *checkedThrough) >= 0) floor = addDays(*checkedThrough, 1);
+    return daysBetween(floor, lookbackStart) < 0 ? lookbackStart : floor;
+}
+
 std::string folderName(Date d) {
     char buf[16];
     std::snprintf(buf, sizeof(buf), "%04d%02d%02d", d.year, d.month, d.day);

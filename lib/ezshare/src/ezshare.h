@@ -51,6 +51,16 @@ int daysBetween(Date from, Date to);
 // "YYYYMMDD", the DATALOG folder name and file name prefix for `d`.
 std::string folderName(Date d);
 
+// The date in a "YYYYMMDD" folder name, or nullopt if it isn't one.
+std::optional<Date> parseFolderName(std::string_view name);
+
+// The oldest night folder a run visits. Nights in the lookback window (from `lookbackStart`)
+// are always visited; older ones back to `cardStart`, the first day the card has data for,
+// except those already checked: a run that visits every older night without a failure records
+// the newest of them as `checkedThrough`, and later runs start the day after it. Without that,
+// nights the card doesn't have would be probed again every run.
+Date backfillFloor(Date lookbackStart, std::optional<Date> cardStart, std::optional<Date> checkedThrough);
+
 // Reads an EDF header's start date, "dd.mm.yy" at bytes 168-175. EDF years 85-99 are
 // 1985-1999 and 00-84 are 2000-2084.
 std::optional<Date> parseEdfStartDate(std::string_view field);

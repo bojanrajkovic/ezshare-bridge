@@ -344,15 +344,28 @@ std::optional<ezshare::Date> cardStartDate() {
     return ezshare::parseEdfStartDate(std::string_view(buf, n));
 }
 
+constexpr const char* kBackfillPath = "/.bridge/backfilled";
+
+// The newest night older than the lookback window that a run has already checked, along with
+// every night before it.
+std::optional<ezshare::Date> backfilledThrough() {
+    fs::File f = SDFS.open(kBackfillPath, "r");
+    if (!f) return std::nullopt;
+    const String s = f.readStringUntil('\n');
+    f.close();
+    return ezshare::parseFolderName(std::string_view(s.c_str(), s.length()));
+}
+
 // Night folders newest first: the lookback window every run, then any older night the
-// bridge hasn't finished, back to the card's start date.
+// bridge hasn't finished or checked, back to the card's start date.
 void syncDatalog(Run& run) {
     time_t now = time(nullptr);
     tm local{};
     localtime_r(&now, &local);
     const ezshare::Date today{local.tm_year + 1900, local.tm_mon + 1, local.tm_mday};
-    ezshare::Date oldest = ezshare::addDays(today, -LOOKBACK_DAYS);
-    if (const auto start = cardStartDate(); start && ezshare::daysBetween(*start, oldest) > 0) oldest = *start;
+    const ezshare::Date lookbackStart = ezshare::addDays(today, -LOOKBACK_DAYS);
+    const ezshare::Date oldest = ezshare::backfillFloor(lookbackStart, cardStartDate(), backfilledThrough());
+    const uint32_t failuresBefore = run.failures;
 
     SDFS.mkdir("/DATALOG");
     for (ezshare::Date d = today; ezshare::daysBetween(oldest, d) >= 0; d = ezshare::addDays(d, -1)) {
@@ -361,6 +374,14 @@ void syncDatalog(Run& run) {
         if (!ezshare::shouldListDatalogFolder(name, today, LOOKBACK_DAYS, exists)) continue;
         if (run.stopForTime()) return;
         syncNight(d, run);
+    }
+
+    // Every older night was visited without a failure, so later runs needn't look again.
+    if (run.failures == failuresBefore) {
+        if (fs::File f = SDFS.open(kBackfillPath, "w")) {
+            f.print(ezshare::folderName(ezshare::addDays(lookbackStart, -1)).c_str());
+            f.close();
+        }
     }
 }
 
