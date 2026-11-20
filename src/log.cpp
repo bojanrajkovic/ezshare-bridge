@@ -3,6 +3,8 @@
 #include <ESP8266WiFi.h>
 #include <SDFS.h>
 #include <WiFiUdp.h>
+#include <lwip/etharp.h>
+#include <lwip/netif.h>
 #include <time.h>
 
 #include "config.h"
@@ -127,10 +129,28 @@ int priority(const String& level) {
 
 }  // namespace
 
+// Right after the bridge joins a network, the gateway's MAC address is unknown. lwIP holds only
+// one packet per address it's still looking up, so a batch sent then loses all but its last
+// line: the boot line and a run's sync line went missing that way. Look the gateway up first.
+bool gatewayResolved() {
+    ip4_addr_t gateway;
+    gateway.addr = static_cast<uint32_t>(WiFi.gatewayIP());
+    struct eth_addr* mac = nullptr;
+    const ip4_addr_t* ip = nullptr;
+    if (etharp_find_addr(netif_default, &gateway, &mac, &ip) >= 0) return true;
+    etharp_request(netif_default, &gateway);
+    for (int i = 0; i < 50; ++i) {
+        delay(10);
+        if (etharp_find_addr(netif_default, &gateway, &mac, &ip) >= 0) return true;
+    }
+    return false;
+}
+
 void shipLogs() {
     if (strlen(SYSLOG_HOST) == 0 || !metrics.sdOk || WiFi.status() != WL_CONNECTED) return;
     static IPAddress target;
     if (!target.isSet() && !WiFi.hostByName(SYSLOG_HOST, target)) return;
+    if (!gatewayResolved()) return;  // the lines wait for the next call
 
     fs::File f = SDFS.open(kLogPath, "r");
     if (!f) return;
