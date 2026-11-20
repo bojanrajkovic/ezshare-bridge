@@ -251,8 +251,10 @@ Range: bytes=<first>-<last>
 - The card serves about five downloads at once. When they're all in use, any request that
   opens a file gets `503 Server Busy : Exceeds the Max Download Threads Limit!`, while misses
   still get `404`. Five abandoned downloads, such as the past-the-end ranges above, lock the
-  card's files away until the CPAP is power-cycled. The card closes the connection after every reply, even when the client asks
-  for keep-alive. The bridge spaces requests at least 100 ms apart and backs off on a `503`.
+  card's files away until the CPAP is power-cycled, so the bridge doesn't retry a `503`. It does
+  retry a request that times out or can't connect. Back-to-back requests are fine: hundreds in
+  a row never drew a `503`.
+- The card closes the connection after every reply, even when the client asks for keep-alive.
 - `HTTPClient::writeToStream` stops after the first 512 bytes of every larger file when writing
   to the microSD, so the bridge copies response bodies a sector at a time itself.
 

@@ -57,32 +57,10 @@ struct ProbeReply {
     Signature signature;  // set on a hit
 };
 
-// The card struggles with bursts of requests (see probeClient), so they're spaced at least this
-// far apart.
-constexpr uint32_t kRequestSpacingMs = 100;
-
-void paceRequests() {
-    static uint32_t lastMs = 0;
-    const uint32_t since = millis() - lastMs;
-    if (lastMs != 0 && since < kRequestSpacingMs) delay(kRequestSpacingMs - since);
-    lastMs = millis();
-}
-
 String downloadUrl(const Folder& folder, const std::string& fname) {
     // fname goes in unencoded: the card hangs on %3F, and names and patterns hold no other
     // characters that need encoding.
     return String("http://" EZSHARE_HOST "/download?fname=") + fname.c_str() + "&fdir=" + folder.fdir;
-}
-
-// Probes share one kept-alive connection. With a new connection per probe, the card piled up
-// closing connections, and after about a thousand it answered 503 to every request that opens
-// a file, until they timed out.
-WiFiClient probeClient;
-HTTPClient probeHttp;
-
-void closeProbeConnection() {
-    probeHttp.end();
-    probeClient.stop();
 }
 
 // Asks the card for the bytes at signatureRange(pattern) of the first file matching
@@ -90,18 +68,19 @@ void closeProbeConnection() {
 ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
     const ezshare::ByteRange range = ezshare::signatureRange(pattern);
     static const char* kHeaders[] = {"Content-Range"};
-    HTTPClient& http = probeHttp;
+    // The card closes the connection after every reply, so each probe opens its own.
+    WiFiClient client;
+    HTTPClient http;
     int code = -1;
-    // Retry what's likely to pass on a second try: a 503 (the card is busy), or a connection
-    // that failed or timed out (a weak signal). Each retry waits twice as long.
+    // Retry a connection that failed or timed out, which a weak signal causes. A 503 isn't
+    // retried: it means every download slot is stuck, and only a power cycle frees them.
     for (uint32_t backoffMs = 500; backoffMs <= 8000; backoffMs *= 2) {
         run.probes++;
         metrics.probes++;
-        paceRequests();
-        http.setReuse(true);
+        http.setReuse(false);
         http.setTimeout(kProbeTimeoutMs);
         code = -1;
-        if (http.begin(probeClient, downloadUrl(folder, pattern))) {
+        if (http.begin(client, downloadUrl(folder, pattern))) {
             if (ezshare::sendsRange(pattern)) {
                 http.addHeader("Range", "bytes=" + String(range.first) + "-" + String(range.last));
             }
@@ -113,20 +92,18 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
                                         text("pattern", pattern.c_str()), num("status", code),
                                         num("ms", millis() - sentMs), num("size", http.getSize()),
                                         text("content_range", http.header("Content-Range")),
-                                        num("connected", probeClient.connected() ? 1 : 0),
                                         text("body", code == HTTP_CODE_SERVICE_UNAVAILABLE ? http.getString() : String())});
 #else
             (void)sentMs;
 #endif
         }
-        if (code != HTTP_CODE_SERVICE_UNAVAILABLE && code >= 0) break;
-        closeProbeConnection();
+        if (code >= 0) break;
+        http.end();
         delay(backoffMs);
     }
     ProbeReply reply{ProbeStatus::Failed, {}};
     if (code == HTTP_CODE_NOT_FOUND) {
         reply.status = ProbeStatus::Miss;
-        http.getString();  // read the error page, so the connection can carry the next probe
     } else if (code == HTTP_CODE_PARTIAL_CONTENT) {
         const String cr = http.header("Content-Range");
         const String body = http.getString();
@@ -137,8 +114,8 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
         }
     } else if (code == HTTP_CODE_OK && http.getSize() >= 0 &&
                static_cast<uint32_t>(http.getSize()) <= range.last + 1) {
-        // The card answers a range that covers the whole file (a .crc is 4-8 bytes) with a plain
-        // 200 and the file itself. A 200 for a bigger file means it ignored the range: a failure.
+        // A .crc is asked for whole, and the card answers with a plain 200 and the file. A 200
+        // for a file bigger than the range means it ignored the range: a failure.
         const String body = http.getString();
         reply.status = ProbeStatus::Hit;
         reply.signature.size = static_cast<uint64_t>(http.getSize());
@@ -146,12 +123,10 @@ ProbeReply probe(const Folder& folder, const std::string& pattern, Run& run) {
             reply.signature.bytes.assign(body.c_str() + range.first, body.length() - range.first);
         }
     }
+    http.end();
     if (reply.status == ProbeStatus::Failed) {
-        closeProbeConnection();  // an unread or unexpected body would corrupt the next reply
         logEvent("error", "probe_failed", {text("pattern", pattern.c_str()), text("folder", folder.local.isEmpty() ? String("/") : folder.local), num("status", code)});
         run.fail(SyncResult::ProbeFailed);
-    } else {
-        http.end();  // keeps the connection open
     }
     return reply;
 }
@@ -238,7 +213,6 @@ bool download(const Folder& folder, const std::string& name, uint64_t total, Run
         HTTPClient http;
         http.setReuse(false);
         http.setTimeout(kDownloadTimeoutMs);
-        paceRequests();
         code = -1;
         if (http.begin(client, downloadUrl(folder, name))) {
             if (have > 0) http.addHeader("Range", "bytes=" + String(have) + "-");
@@ -447,12 +421,23 @@ void syncDatalog(Run& run) {
     }
 }
 
+// SDFS's info64() multiplies cluster counts by the cluster size in 32 bits, so its sizes wrap on
+// a card over 4 GB. The SdFat volume behind it is protected, twice; naming each accessor through
+// a derived class makes it reachable with a member pointer, which is legal on the base object.
+struct FsAccess : fs::FS {
+    using fs::FS::getImpl;
+};
+struct SdfsAccess : sdfs::SDFSImpl {
+    using sdfs::SDFSImpl::getFs;
+};
+
 void updateSdFree() {
-    fs::FSInfo64 info;
-    if (SDFS.info64(info)) {
-        metrics.sdFreeBytes = info.totalBytes - info.usedBytes;
-        metrics.sdFreeMeasured = true;
-    }
+    auto* impl = static_cast<sdfs::SDFSImpl*>((SDFS.*(&FsAccess::getImpl))().get());
+    auto* vol = (impl->*(&SdfsAccess::getFs))()->vol();
+    const int32_t freeClusters = vol->freeClusterCount();
+    if (freeClusters < 0) return;
+    metrics.sdFreeBytes = static_cast<uint64_t>(freeClusters) * vol->bytesPerCluster();
+    metrics.sdFreeMeasured = true;
 }
 
 }  // namespace
@@ -487,7 +472,6 @@ SyncResult runSync() {
         syncRoot(run);
         syncSettings(run);
         syncDatalog(run);
-        closeProbeConnection();
     }
 
     // Autoreconnect keeps retrying the home network if this attempt times out.
