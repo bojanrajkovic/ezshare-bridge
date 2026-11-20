@@ -248,26 +248,34 @@ ESP8266WebServer::ClientFuture handlePropfind(const String& method, const String
     const String base = String(kFilesPrefix) + (path == "/" ? "" : path);
 
     client->setTimeout(kWriteTimeoutMs);
-    client->print("HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml; charset=utf-8\r\n"
-                  "Connection: close\r\n\r\n<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                  "<D:multistatus xmlns:D=\"DAV:\">\n");
+    // One small write per entry made each wait for the client's delayed ACK, about 170 ms, so a
+    // night's folder took over a minute. Entries go out a TCP segment's worth at a time.
+    std::string out =
+        "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml; charset=utf-8\r\n"
+        "Connection: close\r\n\r\n<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<D:multistatus xmlns:D=\"DAV:\">\n";
+    const auto flushIfFull = [&] {
+        if (out.size() < 1400) return;
+        client->write(reinterpret_cast<const uint8_t*>(out.data()), out.size());
+        out.clear();
+    };
     if (!isDir) {
-        client->print(ezshare::davResponse(base.c_str(), false, f.size(), httpDate(f.getLastWrite()).c_str()).c_str());
+        out += ezshare::davResponse(base.c_str(), false, f.size(), httpDate(f.getLastWrite()).c_str());
     } else {
-        client->print(ezshare::davResponse((base + "/").c_str(), true, 0, "").c_str());
+        out += ezshare::davResponse((base + "/").c_str(), true, 0, "");
         if (!depthZero) {
             fs::Dir dir = SDFS.openDir(path);
             while (dir.next()) {
                 const String name = dir.fileName();
                 if (name.startsWith(".") || name.endsWith(".part")) continue;
                 const String href = base + "/" + name + (dir.isDirectory() ? "/" : "");
-                client->print(ezshare::davResponse(href.c_str(), dir.isDirectory(), dir.fileSize(),
-                                                   httpDate(dir.fileTime()).c_str())
-                                  .c_str());
+                out += ezshare::davResponse(href.c_str(), dir.isDirectory(), dir.fileSize(),
+                                            httpDate(dir.fileTime()).c_str());
+                flushIfFull();
             }
         }
     }
-    client->print("</D:multistatus>\n");
+    out += "</D:multistatus>\n";
+    client->write(reinterpret_cast<const uint8_t*>(out.data()), out.size());
     if (f) f.close();
     return ESP8266WebServer::CLIENT_MUST_STOP;
 }
