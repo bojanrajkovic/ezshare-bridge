@@ -58,8 +58,15 @@ void sendIndex(const String& path) {
 }
 
 // A write gives up after this long without progress. The default 5 s cut downloads short on a
-// lossy link, and the puller can't resume them.
+// lossy link.
 constexpr uint32_t kWriteTimeoutMs = 30000;
+
+// Readies a client for a response body. Nagle's algorithm holds back a short final write until
+// the client ACKs, and clients delay their ACKs, so it's off.
+void prepareToSend(WiFiClient& client) {
+    client.setTimeout(kWriteTimeoutMs);
+    client.setNoDelay(true);
+}
 
 // Writes `len` bytes of `f`, from where it's positioned, to the client.
 void sendBytes(fs::File& f, uint32_t len) {
@@ -89,14 +96,14 @@ void sendFile(const String& path) {
         server.sendHeader("Content-Range", "bytes " + String(range->first) + "-" + String(range->last) + "/" +
                                                String(static_cast<uint32_t>(f.size())));
         server.setContentLength(len);
-        server.client().setTimeout(kWriteTimeoutMs);
+        prepareToSend(server.client());
         server.send(206, "application/octet-stream", "");
         sendBytes(f, len);
     } else if (server.method() == HTTP_HEAD) {
         server.setContentLength(f.size());
         server.send(200, "application/octet-stream", "");
     } else {
-        server.client().setTimeout(kWriteTimeoutMs);
+        prepareToSend(server.client());
         server.streamFile(f, "application/octet-stream");
     }
     f.close();
@@ -202,7 +209,7 @@ void handleLog() {
         server.send(404, "text/plain", "no log yet\n");
         return;
     }
-    server.client().setTimeout(kWriteTimeoutMs);
+    prepareToSend(server.client());
     server.streamFile(f, "application/x-ndjson");
     f.close();
 }
@@ -247,7 +254,7 @@ ESP8266WebServer::ClientFuture handlePropfind(const String& method, const String
     const bool isDir = path == "/" || f.isDirectory();
     const String base = String(kFilesPrefix) + (path == "/" ? "" : path);
 
-    client->setTimeout(kWriteTimeoutMs);
+    prepareToSend(*client);
     // One small write per entry made each wait for the client's delayed ACK, about 170 ms, so a
     // night's folder took over a minute. Entries go out a TCP segment's worth at a time.
     std::string out =
