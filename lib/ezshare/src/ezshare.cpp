@@ -115,6 +115,7 @@ std::vector<std::string> settingsStems(const std::vector<std::string>& names) {
 }
 
 std::optional<KnownNight> planKnownNight(const std::vector<std::string>& names) {
+    const std::set<std::string> present(names.begin(), names.end());
     std::set<std::string> stamps, recheck;
     std::string newestBrp;
     for (const auto& name : names) {
@@ -124,6 +125,10 @@ std::optional<KnownNight> planKnownNight(const std::vector<std::string>& names) 
         const std::string_view type = std::string_view(name).substr(16, 3);
         if (type == "EVE" || type == "CSL") recheck.insert(stamp);
         if (type == "BRP" && stamp > newestBrp) newestBrp = stamp;
+        // A copy that failed partway leaves a .part behind; a .crc that failed leaves its .edf
+        // without one. Either is a gap in an otherwise complete night.
+        const bool missingCrc = endsWith(name, ".edf") && !present.count(name.substr(0, name.size() - 4) + ".crc");
+        if (endsWith(name, ".part") || missingCrc) recheck.insert(stamp);
     }
     if (stamps.empty()) return std::nullopt;
     // A session's files carry the times they were opened, a second or so apart, starting with

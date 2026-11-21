@@ -126,8 +126,9 @@ static void test_expand_after_an_earlier_prefix_searches_everything() {
 
 static void test_plan_known_night() {
     const auto plan = planKnownNight({"20260221_194046_CSL.edf", "20260221_194046_CSL.crc", "20260221_194046_EVE.edf",
-                                      "20260221_194052_BRP.edf", "20260221_231502_BRP.edf",
-                                      "20260222_031502_BRP.edf", "20260222_031502_BRP.crc", "20260222_031503_PLD.edf"});
+                                      "20260221_194046_EVE.crc", "20260221_194052_BRP.edf", "20260221_194052_BRP.crc",
+                                      "20260221_231502_BRP.edf", "20260221_231502_BRP.crc", "20260222_031502_BRP.edf",
+                                      "20260222_031502_BRP.crc", "20260222_031503_PLD.edf", "20260222_031503_PLD.crc"});
     TEST_ASSERT_TRUE(plan.has_value());
     // The newest name is on the next day: the night was split at noon.
     TEST_ASSERT_EQUAL_STRING("20260222_031503", plan->after.c_str());
@@ -159,6 +160,22 @@ static void test_plan_known_night_only_eve_and_csl() {
 static void test_plan_known_night_without_session_files() {
     TEST_ASSERT_FALSE(planKnownNight({}).has_value());
     TEST_ASSERT_FALSE(planKnownNight({"notes.txt", "STR.edf"}).has_value());
+}
+
+static void test_plan_known_night_rechecks_gaps() {
+    // 230207's BRP.crc never made it (a failed rename leaves the .part), and 231000's PLD.crc is
+    // missing outright. Both sessions are re-checked although neither is the newest.
+    const auto plan = planKnownNight({"20261120_224500_CSL.edf", "20261120_224500_CSL.crc", "20261120_224500_EVE.edf",
+                                      "20261120_224500_EVE.crc", "20261120_230207_BRP.edf",
+                                      "20261120_230207_BRP.crc.part", "20261120_231000_PLD.edf",
+                                      "20261121_031502_BRP.edf", "20261121_031502_BRP.crc"});
+    TEST_ASSERT_TRUE(plan.has_value());
+    TEST_ASSERT_EQUAL_STRING("20261121_031502", plan->after.c_str());
+    TEST_ASSERT_EQUAL_size_t(4, plan->recheck.size());
+    TEST_ASSERT_EQUAL_STRING("20261120_224500", plan->recheck[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("20261120_230207", plan->recheck[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("20261120_231000", plan->recheck[2].c_str());
+    TEST_ASSERT_EQUAL_STRING("20261121_031502", plan->recheck[3].c_str());
 }
 
 static void test_settings_stems() {
@@ -390,6 +407,7 @@ int main() {
     RUN_TEST(test_plan_known_night_rechecks_the_newest_sessions_brp);
     RUN_TEST(test_plan_known_night_only_eve_and_csl);
     RUN_TEST(test_plan_known_night_without_session_files);
+    RUN_TEST(test_plan_known_night_rechecks_gaps);
     RUN_TEST(test_settings_stems);
     RUN_TEST(test_time_alphabets_split_at_noon);
     RUN_TEST(test_add_days_crosses_month_year_and_leap_day);
