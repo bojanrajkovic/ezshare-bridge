@@ -182,7 +182,8 @@ survives restarts (`/.bridge/runs`), so one run's lines can be read together.
 | `download_stalled` | `path`, `bytes` (in `<name>.part` so far), `total`, `cause` (`sd_short_write`, `timeout` or `closed`), and on a short write `chunk` and `written`; the bridge resumes from there |
 | `download_restarted` | `path`, `status`: a resume got something other than 206, so the file starts over |
 | `download_failed` | `path`, `status` |
-| `sd_error` | `op`, `path` |
+| `sd_error` | `op`, `path`, and for a failed rename `sd_error_code`, SdFat's code for the card's last error |
+| `night_restaged` | `path`: a finished night had a failed copy, so it's staged again and the next run searches it whole |
 
 `ts` is empty until NTP answers; `up` (seconds since boot) orders lines regardless. `level` is
 one of `debug`, `info`, `warn`, `error`, `fatal`.
@@ -314,10 +315,14 @@ bridge has all of it. After that, a run reads the folder's names from the microS
 - searches only for names after the newest one it has. The CPAP names a session's files by its
   start time, so a new file always sorts after the ones already copied;
 - re-checks only the files that can still change: the night's `EVE` and `CSL`, which grow all
-  night, and the newest session's.
+  night, and the newest session's;
+- re-checks any session with a leftover `.part` or an `.edf` without its `.crc`, the marks of
+  an earlier copy that failed.
 
 That's a few dozen probes per night. A staged night is always searched whole, since a failed
-copy can leave a gap that a search from the newest name would never revisit.
+copy can leave a gap that a search from the newest name would never revisit. For the same
+reason, a finished night whose pass has a failure is renamed back to its staged name
+(`night_restaged`), and the next run searches it whole and finishes it again.
 
 ## Development
 

@@ -57,6 +57,21 @@ struct ProbeReply {
     Signature signature;  // set on a hit
 };
 
+// The SdFat object behind SDFS, for what SDFS doesn't expose: 64-bit sizes and the card's error
+// code. It's protected, twice; naming each accessor through a derived class makes it reachable
+// with a member pointer, which is legal on the base object.
+struct FsAccess : fs::FS {
+    using fs::FS::getImpl;
+};
+struct SdfsAccess : sdfs::SDFSImpl {
+    using sdfs::SDFSImpl::getFs;
+};
+
+SdFat* sdFat() {
+    auto* impl = static_cast<sdfs::SDFSImpl*>((SDFS.*(&FsAccess::getImpl))().get());
+    return (impl->*(&SdfsAccess::getFs))();
+}
+
 String downloadUrl(const Folder& folder, const std::string& fname) {
     // fname goes in unencoded: the card hangs on %3F, and names and patterns hold no other
     // characters that need encoding.
@@ -232,9 +247,18 @@ bool download(const Folder& folder, const std::string& name, uint64_t total, Run
         }
         if (got == total) {
             // FAT can't rename over an existing file. The puller keeps the previous copy meanwhile.
+            // The rename has failed now and then right after a large download, so it gets a
+            // second try before the error is logged with the card's own error code.
             SDFS.remove(path);
-            if (!SDFS.rename(partPath, path)) {
-                logEvent("error", "sd_error", {text("op", "rename"), text("path", path)});
+            bool renamed = SDFS.rename(partPath, path);
+            if (!renamed) {
+                delay(200);
+                SDFS.remove(path);
+                renamed = SDFS.rename(partPath, path);
+            }
+            if (!renamed) {
+                logEvent("error", "sd_error", {text("op", "rename"), text("path", path),
+                                               num("sd_error_code", sdFat()->sdErrorCode())});
                 run.pending++;
                 run.fail(SyncResult::SdError);
                 return false;
@@ -377,9 +401,21 @@ void syncNight(ezshare::Date night, Run& run) {
             syncFile(folder, stamp + "_" + type + ".edf", run);
         }
     }
-    if (staged && run.failures == failuresBefore && !SDFS.rename(folder.local, finalPath)) {
+    const bool failed = run.failures != failuresBefore;
+    if (staged && !failed && !SDFS.rename(folder.local, finalPath)) {
         logEvent("error", "sd_error", {text("op", "rename"), text("path", finalPath)});
         run.fail(SyncResult::SdError);
+    }
+    // A finished night is searched only after its newest file, so a copy that failed inside it
+    // would never be looked for again. Staging it again makes the next run search it whole. The
+    // puller already has its files and keeps them.
+    if (!staged && failed) {
+        const String stagedPath = String("/DATALOG/.") + name.c_str();
+        if (SDFS.rename(finalPath, stagedPath)) {
+            logEvent("warn", "night_restaged", {text("path", finalPath)});
+        } else {
+            logEvent("error", "sd_error", {text("op", "rename"), text("path", finalPath)});
+        }
     }
 }
 
@@ -448,18 +484,9 @@ void syncDatalog(Run& run) {
 }
 
 // SDFS's info64() multiplies cluster counts by the cluster size in 32 bits, so its sizes wrap on
-// a card over 4 GB. The SdFat volume behind it is protected, twice; naming each accessor through
-// a derived class makes it reachable with a member pointer, which is legal on the base object.
-struct FsAccess : fs::FS {
-    using fs::FS::getImpl;
-};
-struct SdfsAccess : sdfs::SDFSImpl {
-    using sdfs::SDFSImpl::getFs;
-};
-
+// a card over 4 GB. The volume's own counts don't.
 void updateSdFree() {
-    auto* impl = static_cast<sdfs::SDFSImpl*>((SDFS.*(&FsAccess::getImpl))().get());
-    auto* vol = (impl->*(&SdfsAccess::getFs))()->vol();
+    auto* vol = sdFat()->vol();
     const int32_t freeClusters = vol->freeClusterCount();
     if (freeClusters < 0) return;
     metrics.sdFreeBytes = static_cast<uint64_t>(freeClusters) * vol->bytesPerCluster();
